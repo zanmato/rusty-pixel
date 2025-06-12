@@ -1,0 +1,40 @@
+[package]
+name = "rusty-pixel"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.80"
+async-trait = "0.1.77"
+aws-config = "1.1.6"
+aws-sdk-s3 = "1.16.0"
+axum = { version = "0.7.4", features = ["macros", "multipart"] }
+futures = "0.3.30"
+futures-util = "0.3.30"
+http-body-util = "0.1.0"
+lazy_static = "1.4.0"
+libvips = { git = "https://github.com/zanmato/libvips-rust-bindings" }
+metrics = "0.22.3"
+metrics-exporter-prometheus = "0.14.0"
+rayon = "1.8.1"
+regex = "1.10.3"
+reqwest = { version = "0.11.24", features = ["multipart"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_derive = "1.0.197"
+serde_json = "1.0.114"
+thiserror = "1.0.58"
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "signal"] }
+toml = "0.8.10"
+tower = { version = "0.4.13", features = ["util"] }
+tower-http = { version = "0.5.2", features = [
+  "trace",
+  "catch-panic",
+  "timeout",
+] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+url = "2.5.0"
+uuid = { version = "1.8.0", features = ["v4"] }
+zip = "0.6.6"

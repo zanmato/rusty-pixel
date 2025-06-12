@@ -1,0 +1,19 @@
+[app]
+listen = "0.0.0.0:6100"
+metrics_listen = "0.0.0.0:6101"
+vips_concurrency = 4
+vips_cache_max_mem_mb = 0
+max_body_size_mb = 100
+api_key = "test"
+
+[storage]
+storage_type = "S3"
+
+[storage.s3]
+bucket = "your-bucket"
+endpoint = "http://localhost:9008"
+base_url = "http://localhost:9008/your-bucket"
+force_path_style = true
+region = "auto"
+access_key_id = "access_key_id"
+secret_access_key = "secret_access_key"
