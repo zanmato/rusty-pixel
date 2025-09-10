@@ -30,10 +30,11 @@ pub async fn process_image(
 
     match name {
       "image" => {
-        uploaded_image = Some(field.bytes().await.unwrap());
+        uploaded_image = Some(field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?);
       }
       "details" => {
-        processing_request = serde_json::from_slice(&field.bytes().await.unwrap())
+        let bytes = field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
+        processing_request = serde_json::from_slice(&bytes)
           .map_err(|e| AppError::BadRequest(e.to_string()))?;
       }
       _ => {}
@@ -113,11 +114,23 @@ pub async fn process_image(
   rayon::spawn(move || {
     for config in processing_request.configurations {
       let data = data.clone();
-      let image = VipsImage::new_from_buffer(&data, "").unwrap();
+      let image = match VipsImage::new_from_buffer(&data, "") {
+        Ok(i) => i,
+        Err(e) => {
+          let _ = send.send(Err(anyhow!("failed to create image from buffer: {}", e)));
+          return;
+        }
+      };
 
       let mut output_image: VipsImage = image;
 
-      let loader = output_image.get_string("vips-loader").unwrap();
+      let loader = match output_image.get_string("vips-loader") {
+        Ok(l) => l,
+        Err(e) => {
+          let _ = send.send(Err(anyhow!("failed to get vips-loader metadata: {}", e)));
+          return;
+        }
+      };
 
       // Pass the image as is
       if config.conditions.allow_vector && loader == "svgload_buffer" {
@@ -261,8 +274,20 @@ pub async fn process_image(
     // Upload the given image as well
     if processing_request.save_original {
       let data = data.clone();
-      let image = VipsImage::new_from_buffer(&data, "").unwrap();
-      let loader = image.get_string("vips-loader").unwrap();
+      let image = match VipsImage::new_from_buffer(&data, "") {
+        Ok(i) => i,
+        Err(e) => {
+          let _ = send.send(Err(anyhow!("failed to create image from buffer: {}", e)));
+          return;
+        }
+      };
+      let loader = match image.get_string("vips-loader") {
+        Ok(l) => l,
+        Err(e) => {
+          let _ = send.send(Err(anyhow!("failed to get vips-loader metadata: {}", e)));
+          return;
+        }
+      };
 
       let meta = image_processing::loader_to_mime_ext(loader);
       let _ = tx.blocking_send(UploadImage {
@@ -280,9 +305,13 @@ pub async fn process_image(
   let mut processed_images = Vec::new();
   while let Some(img) = rx.recv().await {
     // Upload image
+    let data = match Arc::try_unwrap(img.data) {
+      Ok(data) => data,
+      Err(arc) => (*arc).clone(),
+    };
     let upload_res = match state
       .storage_client
-      .upload_object(Arc::try_unwrap(img.data).unwrap(), &img.path, &img.mime)
+      .upload_object(data, &img.path, &img.mime)
       .await
     {
       Ok(r) => r,
