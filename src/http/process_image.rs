@@ -1,5 +1,7 @@
 use crate::image_modifier;
-use crate::image_processing::{self, ImageProcessingRequest, ProcessedImage, UploadImage};
+use crate::image_processing::{
+  self, ImageProcessingRequest, ProcessImageForm, ProcessedImage, UploadImage,
+};
 
 use anyhow::anyhow;
 use axum::{
@@ -14,6 +16,19 @@ use uuid::Uuid;
 use crate::http::error::AppError;
 use crate::http::AppState;
 
+#[utoipa::path(
+  post,
+  path = "/api/v1/process-image",
+  request_body(content = ProcessImageForm, content_type = "multipart/form-data"),
+  responses(
+    (status = 200, description = "Successfully processed images", body = [ProcessedImage]),
+    (status = 400, description = "Bad request - invalid input"),
+    (status = 401, description = "Unauthorized - invalid API key"),
+    (status = 404, description = "Not found - environment image not found"),
+    (status = 500, description = "Internal server error")
+  ),
+  security(("api_key" = []))
+)]
 pub async fn process_image(
   State(state): State<AppState>,
   mut multipart: extract::Multipart,
@@ -30,12 +45,20 @@ pub async fn process_image(
 
     match name {
       "image" => {
-        uploaded_image = Some(field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?);
+        uploaded_image = Some(
+          field
+            .bytes()
+            .await
+            .map_err(|e| AppError::BadRequest(e.to_string()))?,
+        );
       }
       "details" => {
-        let bytes = field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
-        processing_request = serde_json::from_slice(&bytes)
+        let bytes = field
+          .bytes()
+          .await
           .map_err(|e| AppError::BadRequest(e.to_string()))?;
+        processing_request =
+          serde_json::from_slice(&bytes).map_err(|e| AppError::BadRequest(e.to_string()))?;
       }
       _ => {}
     }

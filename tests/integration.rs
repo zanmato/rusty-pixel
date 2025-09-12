@@ -17,6 +17,7 @@ fn bootstrap() -> &'static axum::Router {
         api_key: "test".to_string(),
         vips_concurrency: 1,
         max_body_size_mb: 10,
+        enable_openapi: Some(false),
         listen: "0.0.0.0:0".to_string(),
         metrics_listen: "0.0.0.0:0".to_string(),
       },

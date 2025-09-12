@@ -1,8 +1,17 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, ToSchema)]
+#[allow(unused)]
+pub struct ProcessImageForm {
+  details: ImageProcessingRequest,
+  #[schema(format = Binary, content_media_type = "application/octet-stream")]
+  image: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct ImageProcessingRequest {
   pub id: String,
   pub path: String,
@@ -13,7 +22,7 @@ pub struct ImageProcessingRequest {
   pub configurations: Vec<ImageConfiguration>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct ImageConfiguration {
   pub id: String,
   pub path: String,
@@ -24,7 +33,7 @@ pub struct ImageConfiguration {
   pub conditions: ImageConditions,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, ToSchema)]
 pub struct ImageConditions {
   pub transparent: bool,
   pub trim: bool,
@@ -33,7 +42,7 @@ pub struct ImageConditions {
   pub allow_vector: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct EnvironmentImage {
   pub path: String,
   pub width: i32,
@@ -43,7 +52,7 @@ pub struct EnvironmentImage {
   pub margin_percent: i32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct ProcessedImage {
   pub id: String,
   pub alternative_to: Option<String>,

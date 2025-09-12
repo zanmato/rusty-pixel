@@ -5,6 +5,7 @@ vips_concurrency = 4
 vips_cache_max_mem_mb = 0
 max_body_size_mb = 100
 api_key = "test"
+enable_openapi = false
 
 [storage]
 storage_type = "S3"

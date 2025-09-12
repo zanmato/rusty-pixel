@@ -21,6 +21,7 @@ pub struct AppConfig {
   pub vips_concurrency: i32,
   pub api_key: String,
   pub max_body_size_mb: usize,
+  pub enable_openapi: Option<bool>,
 }
 
 #[derive(Deserialize)]

@@ -18,8 +18,13 @@ use tower_http::{
   trace::{self, TraceLayer},
 };
 use tracing::Level;
+use utoipa::OpenApi;
+use utoipa_redoc::{Redoc, Servable};
 
 use crate::config::{Config, StorageType};
+use crate::image_processing::{
+  EnvironmentImage, ImageConditions, ImageConfiguration, ImageProcessingRequest, ProcessedImage,
+};
 use anyhow::Result;
 use libvips::VipsApp;
 
@@ -29,6 +34,41 @@ mod process_image;
 mod s3;
 mod scale_image;
 mod storage;
+
+#[derive(OpenApi)]
+#[openapi(
+  paths(
+    process_image::process_image,
+    scale_image::scale
+  ),
+  components(
+    schemas(ImageProcessingRequest, ImageConfiguration, ImageConditions, EnvironmentImage, ProcessedImage)
+  ),
+  modifiers(&SecurityAddon),
+  info(
+    title = "Rusty Pixel API",
+    version = "0.1.1",
+    description = "Image proxy service that applies real-time image transformations using libvips"
+  )
+)]
+struct ApiDoc;
+
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+  fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+    if let Some(components) = openapi.components.as_mut() {
+      components.add_security_scheme(
+        "api_key",
+        utoipa::openapi::security::SecurityScheme::ApiKey(
+          utoipa::openapi::security::ApiKey::Header(utoipa::openapi::security::ApiKeyValue::new(
+            "X-API-Key",
+          )),
+        ),
+      );
+    }
+  }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -125,18 +165,32 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
       middleware::from_fn_with_state(state.clone(), auth),
     ));
 
-  let app = Router::new()
+  let mut app = Router::new()
     .merge(private_app)
     .merge(public_app)
-    .with_state(state)
-    .layer((
-      middleware::from_fn(track_metrics),
-      TraceLayer::new_for_http()
-        .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-        .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
-      TimeoutLayer::new(Duration::from_secs(60)),
-      CatchPanicLayer::new(),
-    ));
+    .with_state(state);
+
+  // Conditionally add OpenAPI routes if enabled
+  if cfg.app.enable_openapi.unwrap_or(false) {
+    app = app
+      .merge(Redoc::with_url(
+        "/redoc",
+        serde_json::to_value(&ApiDoc::openapi()).unwrap(),
+      ))
+      .route(
+        "/api-docs/openapi.json",
+        get(|| async { axum::Json(ApiDoc::openapi()) }),
+      );
+  }
+
+  let app = app.layer((
+    middleware::from_fn(track_metrics),
+    TraceLayer::new_for_http()
+      .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+      .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+    TimeoutLayer::new(Duration::from_secs(60)),
+    CatchPanicLayer::new(),
+  ));
 
   Ok(app)
 }

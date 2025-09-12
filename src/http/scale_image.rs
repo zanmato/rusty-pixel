@@ -12,6 +12,19 @@ use crate::image_modifier;
 
 use crate::http::error::AppError;
 
+#[utoipa::path(
+  get,
+  path = "/scale/{options}/{uri}",
+  params(
+    ("options" = String, description = "Image transformation options (e.g., 's40x30-m10-rh200')"),
+    ("uri" = String, description = "URI/path to the source image")
+  ),
+  responses(
+    (status = 200, description = "Successfully transformed image", content_type = "image/jpeg"),
+    (status = 404, description = "Image not found"),
+    (status = 500, description = "Internal server error")
+  )
+)]
 pub async fn scale(
   Path((options, uri)): Path<(String, String)>,
   State(state): State<AppState>,
