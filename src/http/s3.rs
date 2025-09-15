@@ -63,7 +63,7 @@ impl Storage for Client {
       .await
       .context("failed to upload object");
 
-    let url = format!("{}/{}", self.base_url, key);
+    let url = format!("{}/{}", self.base_url, key.trim_start_matches('/'));
 
     Ok(PutObjectOutput {
       etag: res?.e_tag.unwrap_or("".to_owned()).trim_matches('"').into(),
