@@ -47,7 +47,7 @@ mod storage;
   modifiers(&SecurityAddon),
   info(
     title = "Rusty Pixel API",
-    version = "0.1.2",
+    version = "0.1.3",
     description = "Image proxy service that applies real-time image transformations using libvips"
   )
 )]
