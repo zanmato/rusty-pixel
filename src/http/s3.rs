@@ -1,4 +1,4 @@
-use crate::http::storage::{PutObjectOutput, Storage};
+use crate::http::storage::{ImageType, PutObjectOutput, Storage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
@@ -10,16 +10,25 @@ pub struct Client {
   s3_client: aws_sdk_s3::Client,
   bucket: String,
   base_url: Url,
+  original_base_url: Option<Url>,
 }
 
 impl Client {
-  pub fn new(s3_client: aws_sdk_s3::Client, bucket: &str, base_url: &str) -> Self {
+  pub fn new(
+    s3_client: aws_sdk_s3::Client,
+    bucket: &str,
+    base_url: &str,
+    original_base_url: Option<&str>,
+  ) -> Self {
     let base_url = Url::parse(base_url).expect("failed to parse base url");
+    let original_base_url =
+      original_base_url.map(|url| Url::parse(url).expect("failed to parse original base url"));
 
     Self {
       s3_client,
       bucket: bucket.to_owned(),
       base_url,
+      original_base_url,
     }
   }
 }
@@ -48,7 +57,13 @@ impl Storage for Client {
     Ok(data)
   }
 
-  async fn upload_object(&self, data: Vec<u8>, key: &str, mime: &str) -> Result<PutObjectOutput> {
+  async fn upload_object(
+    &self,
+    data: Vec<u8>,
+    key: &str,
+    mime: &str,
+    image_type: ImageType,
+  ) -> Result<PutObjectOutput> {
     let size = data.len() as u64;
     let body = ByteStream::from(data);
     let res = self
@@ -63,7 +78,16 @@ impl Storage for Client {
       .await
       .context("failed to upload object");
 
-    let url = self.base_url.join(key)?.to_string();
+    let url = match image_type {
+      ImageType::Original => {
+        if let Some(ref original_base_url) = self.original_base_url {
+          original_base_url.join(key)?.to_string()
+        } else {
+          self.base_url.join(key)?.to_string()
+        }
+      }
+      ImageType::Processed => self.base_url.join(key)?.to_string(),
+    };
 
     Ok(PutObjectOutput {
       etag: res?.e_tag.unwrap_or("".to_owned()).trim_matches('"').into(),

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::http::storage::{PutObjectOutput, Storage};
+use crate::http::storage::{ImageType, PutObjectOutput, Storage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
@@ -33,7 +33,13 @@ impl Storage for Client {
     Ok(data)
   }
 
-  async fn upload_object(&self, data: Vec<u8>, key: &str, _mime: &str) -> Result<PutObjectOutput> {
+  async fn upload_object(
+    &self,
+    data: Vec<u8>,
+    key: &str,
+    _mime: &str,
+    _image_type: ImageType,
+  ) -> Result<PutObjectOutput> {
     let size = data.len() as u64;
 
     let file_path = &self.path.join(key);

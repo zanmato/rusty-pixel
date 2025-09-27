@@ -40,6 +40,7 @@ pub struct StorageConfigS3 {
   pub region: String,
   pub force_path_style: bool,
   pub base_url: String,
+  pub original_base_url: Option<String>,
 }
 
 #[derive(Deserialize)]

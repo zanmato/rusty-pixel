@@ -1,3 +1,4 @@
+use crate::http::storage::ImageType;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,7 @@ pub struct UploadImage {
   pub mime: String,
   pub path: String,
   pub data: Arc<Vec<u8>>,
+  pub image_type: ImageType,
 }
 
 pub fn loader_to_mime_ext(loader: &str) -> (&'static str, &'static str) {

@@ -14,6 +14,7 @@ storage_type = "S3"
 bucket = "your-bucket"
 endpoint = "http://localhost:9008"
 base_url = "http://localhost:9008/your-bucket"
+original_base_url = "https://cdn.example.com"
 force_path_style = true
 region = "auto"
 access_key_id = "access_key_id"

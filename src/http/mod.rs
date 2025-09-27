@@ -33,7 +33,7 @@ mod local_storage;
 mod process_image;
 mod s3;
 mod scale_image;
-mod storage;
+pub mod storage;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -144,6 +144,7 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
         client,
         storage_config.bucket.as_str(),
         storage_config.base_url.as_str(),
+        storage_config.original_base_url.as_deref(),
       )))
     }
   };
@@ -175,7 +176,7 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
     app = app
       .merge(Redoc::with_url(
         "/redoc",
-        serde_json::to_value(&ApiDoc::openapi()).unwrap(),
+        serde_json::to_value(ApiDoc::openapi()).unwrap(),
       ))
       .route(
         "/api-docs/openapi.json",

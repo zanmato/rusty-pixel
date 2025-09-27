@@ -1,3 +1,4 @@
+use crate::http::storage::ImageType;
 use crate::image_modifier;
 use crate::image_processing::{
   self, ImageProcessingRequest, ProcessImageForm, ProcessedImage, UploadImage,
@@ -163,6 +164,7 @@ pub async fn process_image(
           id: config.id.clone(),
           data,
           alternative_to: None,
+          image_type: ImageType::Processed,
         }) {
           let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
           return;
@@ -258,6 +260,7 @@ pub async fn process_image(
         id: config.id.clone(),
         data: Arc::new(res.unwrap()),
         alternative_to: None,
+        image_type: ImageType::Processed,
       }) {
         let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
         return;
@@ -287,6 +290,7 @@ pub async fn process_image(
           data: Arc::new(res.unwrap()),
           mime: "image/webp".to_owned(),
           alternative_to: Some(config.id.clone()),
+          image_type: ImageType::Processed,
         }) {
           let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
           return;
@@ -319,6 +323,7 @@ pub async fn process_image(
         data,
         mime: meta.0.to_owned(),
         alternative_to: None,
+        image_type: ImageType::Original,
       });
     }
 
@@ -334,7 +339,7 @@ pub async fn process_image(
     };
     let upload_res = match state
       .storage_client
-      .upload_object(data, &img.path, &img.mime)
+      .upload_object(data, &img.path, &img.mime, img.image_type)
       .await
     {
       Ok(r) => r,
