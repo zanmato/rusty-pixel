@@ -40,3 +40,6 @@ utoipa = { version = "5", features = ["axum_extras", "uuid"] }
 utoipa-redoc = { version = "4", features = ["axum"] }
 uuid = { version = "1.8.0", features = ["v4"] }
 zip = "0.6.6"
+
+[build-dependencies]
+cargo-chef = "0.1.69"

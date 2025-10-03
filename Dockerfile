@@ -1,20 +1,23 @@
-FROM rust:1.87-alpine3.22 AS builder
+FROM rust:1.90-alpine3.22 AS chef
 WORKDIR /app
-
 RUN apk add --update --no-cache vips vips-dev build-base musl-dev openssl-dev
+RUN cargo install cargo-chef
 
-# Build and cache the dependencies
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo fetch
-RUN cargo build --release
-RUN rm src/main.rs
-
-# Copy the actual code files and build the application
 COPY src ./src/
-# Update the file date
-RUN touch src/main.rs
-RUN RUSTFLAGS="-C target-feature=-crt-static $(pkg-config vips --libs)" cargo build --release
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this layer is cached unless Cargo.toml/Cargo.lock change
+RUN cargo chef cook --release --recipe-path recipe.json --locked
+
+# Copy the actual source code
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src/
+# Build the application - only rebuilt when source changes
+RUN RUSTFLAGS="-C target-feature=-crt-static $(pkg-config vips --libs)" cargo build --release --locked
 
 FROM alpine:3.22
 ENV GI_TYPELIB_PATH=/usr/lib/girepository-1.0

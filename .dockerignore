@@ -1,3 +1,44 @@
-target
-.git
-.github
+# Rust
+target/
+**/*.rs.bk
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Documentation
+*.md
+docs/
+
+# CI/CD
+.gitlab-ci.yml
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Test data
+tests/testdata/
+
+# Configuration
+config.toml
+config.local.toml
