@@ -10,10 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 COPY bin/${TARGETARCH}/rusty-pixel /app/rustypixel
+RUN chmod +x /app/rustypixel
 
-HEALTHCHECK --interval=30s --start-period=10s CMD curl --fail http://localhost:7003/healthz || exit 1
+HEALTHCHECK --interval=30s --start-period=10s CMD curl --fail http://localhost:6101/healthz || exit 1
 
-EXPOSE 7002
+EXPOSE 6100 6101
 
 WORKDIR /app
 
