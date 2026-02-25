@@ -3,7 +3,6 @@ use axum::{
   response::{IntoResponse, Response},
 };
 use thiserror::Error;
-use tracing::error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
