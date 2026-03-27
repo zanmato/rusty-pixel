@@ -153,3 +153,118 @@ async fn process_image() {
 
   assert_eq!(response.status(), reqwest::StatusCode::OK);
 }
+
+#[tokio::test]
+async fn scale_image_not_found() {
+  let router = bootstrap().clone();
+
+  let response = router
+    .oneshot(
+      Request::builder()
+        .uri("/scale/s400x400/nonexistent.png")
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+  assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn scale_image_invalid_options() {
+  let router = bootstrap().clone();
+
+  let response = router
+    .oneshot(
+      Request::builder()
+        .uri("/scale/invalid/skaune-portrait.png")
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+  // Invalid options produce an error since no modifiers are parsed
+  assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn process_image_unauthorized() {
+  let router = bootstrap().clone();
+
+  let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+  let addr = listener.local_addr().unwrap();
+
+  tokio::spawn(async move {
+    axum::serve(listener, router).await.unwrap();
+  });
+
+  let client = reqwest::Client::new();
+
+  // No API key
+  let response = client
+    .post(&format!(
+      "http://{}:{}/api/v1/process-image",
+      addr.ip(),
+      addr.port()
+    ))
+    .send()
+    .await
+    .expect("failed to send request");
+
+  assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+  // Wrong API key
+  let response = client
+    .post(&format!(
+      "http://{}:{}/api/v1/process-image",
+      addr.ip(),
+      addr.port()
+    ))
+    .header("X-API-Key", "wrong-key")
+    .send()
+    .await
+    .expect("failed to send request");
+
+  assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn process_image_missing_fields() {
+  let router = bootstrap().clone();
+
+  let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+  let addr = listener.local_addr().unwrap();
+
+  tokio::spawn(async move {
+    axum::serve(listener, router).await.unwrap();
+  });
+
+  let client = reqwest::Client::new();
+
+  // Only send image, no details field
+  let file = fs::read("tests/testdata/skaune-portrait.png")
+    .await
+    .expect("failed to read file");
+  let file_part = reqwest::multipart::Part::bytes(file)
+    .file_name("skaune-portrait.png")
+    .mime_str("image/png")
+    .unwrap();
+
+  let form = reqwest::multipart::Form::new().part("image", file_part);
+
+  let response = client
+    .post(&format!(
+      "http://{}:{}/api/v1/process-image",
+      addr.ip(),
+      addr.port()
+    ))
+    .header("X-API-Key", "test")
+    .multipart(form)
+    .send()
+    .await
+    .expect("failed to send request");
+
+  assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+}

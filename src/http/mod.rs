@@ -1,11 +1,11 @@
 use anyhow::anyhow;
 use axum::{
+  Router,
   extract::{DefaultBodyLimit, MatchedPath, Request, State},
   http::StatusCode,
   middleware::{self, Next},
   response::{IntoResponse, Response},
   routing::{get, post},
-  Router,
 };
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use std::future::ready;
@@ -72,7 +72,7 @@ impl utoipa::Modify for SecurityAddon {
 
 #[derive(Clone)]
 struct AppState {
-  storage_client: Arc<Box<dyn storage::Storage>>,
+  storage_client: Arc<dyn storage::Storage>,
   vips_app: Arc<VipsApp>,
   api_key: String,
 }
@@ -110,10 +110,10 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
   vips_app.cache_set_max_files(0);
 
   // Init storage client
-  let storage_client: Arc<Box<dyn storage::Storage>> = match cfg.storage.storage_type {
+  let storage_client: Arc<dyn storage::Storage> = match cfg.storage.storage_type {
     StorageType::Local => {
       let path = Path::new(&cfg.storage.local.as_ref().unwrap().path).to_path_buf();
-      Arc::new(Box::new(local_storage::Client::new(path)))
+      Arc::new(local_storage::Client::new(path))
     }
     StorageType::S3 => {
       let storage_config = match &cfg.storage.s3 {
@@ -140,11 +140,11 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
         .build();
 
       let client = aws_sdk_s3::Client::from_conf(s3_config);
-      Arc::new(Box::new(s3::Client::new(
+      Arc::new(s3::Client::new(
         client,
         storage_config.bucket.as_str(),
         storage_config.base_url.as_str(),
-      )))
+      ))
     }
   };
 
@@ -156,7 +156,7 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
   };
 
   // Routing
-  let public_app = Router::new().route("/scale/:options/*uri", get(scale_image::scale));
+  let public_app = Router::new().route("/scale/{options}/{*uri}", get(scale_image::scale));
 
   let private_app = Router::new()
     .route("/api/v1/process-image", post(process_image::process_image))
@@ -173,10 +173,7 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
   // Conditionally add OpenAPI routes if enabled
   if cfg.app.enable_openapi.unwrap_or(false) {
     app = app
-      .merge(Redoc::with_url(
-        "/redoc",
-        serde_json::to_value(&ApiDoc::openapi()).unwrap(),
-      ))
+      .merge(Redoc::with_url("/redoc", ApiDoc::openapi()))
       .route(
         "/api-docs/openapi.json",
         get(|| async { axum::Json(ApiDoc::openapi()) }),
@@ -188,7 +185,7 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
     TraceLayer::new_for_http()
       .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
       .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
-    TimeoutLayer::new(Duration::from_secs(60)),
+    TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(60)),
     CatchPanicLayer::new(),
   ));
 

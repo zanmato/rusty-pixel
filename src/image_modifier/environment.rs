@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use libvips::{ops, VipsImage};
+use libvips::{VipsImage, ops};
 
 use super::ImageModifier;
 
@@ -26,7 +26,8 @@ impl EnvironmentModifier {
 
 impl ImageModifier for EnvironmentModifier {
   fn apply(&self, img: &VipsImage) -> Result<Option<VipsImage>, Box<dyn std::error::Error>> {
-    let env_image = VipsImage::new_from_buffer(&self.env_image, "").unwrap();
+    let env_image = VipsImage::new_from_buffer(&self.env_image, "")
+      .map_err(|e| format!("failed to load environment image: {}", e))?;
 
     // scale input image
     let scaled = ops::thumbnail_image_with_opts(
@@ -36,8 +37,8 @@ impl ImageModifier for EnvironmentModifier {
         height: self.opts.height,
         size: ops::Size::Both,
         crop: ops::Interesting::Centre,
-        export_profile: "sRGB".to_owned(),
-        import_profile: "sRGB".to_owned(),
+        output_profile: "sRGB".to_owned(),
+        input_profile: "sRGB".to_owned(),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;

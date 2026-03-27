@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 
@@ -49,8 +49,9 @@ pub struct StorageConfigLocal {
 
 pub fn parse(config_path: &str) -> Result<Config> {
   // Load config
-  let toml_str = fs::read_to_string(config_path).expect("failed to read config file");
-  let cfg: Config = toml::from_str(&toml_str).expect("failed to deserialize config");
+  let toml_str = fs::read_to_string(config_path)
+    .with_context(|| format!("failed to read config file: {}", config_path))?;
+  let cfg: Config = toml::from_str(&toml_str).context("failed to deserialize config")?;
 
   Ok(cfg)
 }

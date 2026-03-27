@@ -1,10 +1,9 @@
 use axum::{
   extract::{Path, State},
-  http::{header, StatusCode},
+  http::{StatusCode, header},
   response::IntoResponse,
 };
-use libvips::{ops, VipsImage};
-use std::mem;
+use libvips::{VipsImage, ops};
 use tracing::error;
 
 use crate::http::AppState;
@@ -47,21 +46,26 @@ pub async fn scale(
       return;
     }
 
-    let mut output_image = VipsImage::new_from_buffer(&data, "").unwrap();
-    for opt in modifiers {
-      let modifier_res = opt.apply(&output_image);
-      if let Err(e) = modifier_res {
-        mem::drop(data);
-        let _ = send.send(Err(e.to_string()));
+    let mut output_image = match VipsImage::new_from_buffer(&data, "") {
+      Ok(img) => img,
+      Err(e) => {
+        let _ = send.send(Err(format!("failed to load image: {}", e)));
         return;
       }
+    };
 
-      if let Some(m) = modifier_res.unwrap() {
-        output_image = m;
+    for opt in modifiers {
+      match opt.apply(&output_image) {
+        Err(e) => {
+          let _ = send.send(Err(e.to_string()));
+          return;
+        }
+        Ok(Some(m)) => output_image = m,
+        Ok(None) => {}
       }
     }
 
-    let res = ops::jpegsave_buffer_with_opts(
+    match ops::jpegsave_buffer_with_opts(
       &output_image,
       &ops::JpegsaveBufferOptions {
         q: 80,
@@ -69,38 +73,36 @@ pub async fn scale(
         profile: "sRGB".to_owned(),
         ..ops::JpegsaveBufferOptions::default()
       },
-    );
-
-    if let Err(e) = res {
-      mem::drop(data);
-      let _ = send.send(Err(e.to_string()));
-      return;
+    ) {
+      Ok(buffer) => {
+        let _ = send.send(Ok(buffer));
+      }
+      Err(e) => {
+        let _ = send.send(Err(e.to_string()));
+      }
     }
 
-    let _ = send.send(Ok(res.unwrap()));
-
-    // The vips image will hold a reference to the buffer, so we need to drop it
-    mem::drop(data);
+    // Ensure data buffer outlives VipsImage C references
+    drop(data);
   });
 
-  let recv_res = recv.await.map_err(|e| {
-    error!("failed to receive: {}", e);
-    e
-  });
-
-  let final_image = recv_res.unwrap();
-
-  if final_image.is_err() {
-    error!(
-      "failed to transform image: {} {}",
-      final_image.unwrap_err(),
-      state.vips_app.error_buffer().unwrap_or("")
-    );
-    return (StatusCode::INTERNAL_SERVER_ERROR, "").into_response();
-  }
   let headers = [(header::CONTENT_TYPE, "image/jpeg")];
 
-  (StatusCode::OK, headers, final_image.unwrap()).into_response()
+  match recv.await {
+    Ok(Ok(image_data)) => (StatusCode::OK, headers, image_data).into_response(),
+    Ok(Err(e)) => {
+      error!(
+        "failed to transform image: {} {}",
+        e,
+        state.vips_app.error_buffer().unwrap_or("")
+      );
+      (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
+    }
+    Err(e) => {
+      error!("failed to receive from image processing task: {}", e);
+      (StatusCode::INTERNAL_SERVER_ERROR, "").into_response()
+    }
+  }
 }
 
 fn parse_options(option_string: &str) -> Vec<Box<dyn image_modifier::ImageModifier>> {
@@ -125,4 +127,51 @@ fn parse_options(option_string: &str) -> Vec<Box<dyn image_modifier::ImageModifi
   }
 
   opts
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn parse_options_scale_and_margin() {
+    let opts = parse_options("s400x300-m10");
+    assert_eq!(opts.len(), 1); // scale modifier (margin is consumed by scale)
+  }
+
+  #[test]
+  fn parse_options_multiple_modifiers() {
+    let opts = parse_options("bw-olandscape-s400x400-m20");
+    assert_eq!(opts.len(), 3); // blackandwhite, orientation, scale
+  }
+
+  #[test]
+  fn parse_options_resize_height() {
+    let opts = parse_options("rh200");
+    assert_eq!(opts.len(), 1);
+  }
+
+  #[test]
+  fn parse_options_resize_width() {
+    let opts = parse_options("rw300");
+    assert_eq!(opts.len(), 1);
+  }
+
+  #[test]
+  fn parse_options_empty_string() {
+    let opts = parse_options("");
+    assert_eq!(opts.len(), 0);
+  }
+
+  #[test]
+  fn parse_options_invalid() {
+    let opts = parse_options("invalid-xyz-123");
+    assert_eq!(opts.len(), 0);
+  }
+
+  #[test]
+  fn parse_options_trim() {
+    let opts = parse_options("tr-s200x200");
+    assert_eq!(opts.len(), 2); // trim + scale
+  }
 }

@@ -1,5 +1,6 @@
-use lazy_static::lazy_static;
-use libvips::{ops, VipsImage};
+use std::sync::LazyLock;
+
+use libvips::{VipsImage, ops};
 use regex::Regex;
 
 use super::ImageModifier;
@@ -12,10 +13,8 @@ pub struct ScaleModifier {
   crop: bool,
 }
 
-lazy_static! {
-  static ref SCALE_REGEX: Regex = Regex::new(r"^s(\d+)x(\d+)$").unwrap();
-  static ref MARGIN_REGEX: Regex = Regex::new(r"^m(\d+)$").unwrap();
-}
+static SCALE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^s(\d+)x(\d+)$").unwrap());
+static MARGIN_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^m(\d+)$").unwrap());
 
 impl ScaleModifier {
   pub fn new(aspect: f64, margin_percentage: i32, size: Option<i32>, crop: bool) -> ScaleModifier {
@@ -70,11 +69,7 @@ impl ImageModifier for ScaleModifier {
     let (margin, area_height, area_width, new_width, new_height): (f64, i32, i32, i32, i32);
 
     if source_width > source_height {
-      let base = if self.size.is_some() {
-        self.size.unwrap()
-      } else {
-        source_width as i32
-      };
+      let base = self.size.unwrap_or(source_width as i32);
 
       margin = self.margin_percentage as f64 * 0.01 * (base as f64 / aspect);
       new_height = (base as f64 / aspect - margin).floor() as i32;
@@ -83,11 +78,7 @@ impl ImageModifier for ScaleModifier {
       area_height = (base as f64 / aspect).floor() as i32;
       area_width = base;
     } else {
-      let base = if self.size.is_some() {
-        self.size.unwrap()
-      } else {
-        source_height as i32
-      };
+      let base = self.size.unwrap_or(source_height as i32);
 
       margin = self.margin_percentage as f64 * 0.01 * (base as f64 / aspect);
       new_width = (base as f64 / aspect - margin).floor() as i32;
@@ -107,8 +98,8 @@ impl ImageModifier for ScaleModifier {
           true => ops::Interesting::Centre,
           false => ops::Interesting::None,
         },
-        export_profile: "sRGB".to_owned(),
-        import_profile: "sRGB".to_owned(),
+        output_profile: "sRGB".to_owned(),
+        input_profile: "sRGB".to_owned(),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;

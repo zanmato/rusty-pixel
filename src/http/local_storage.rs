@@ -38,9 +38,13 @@ impl Storage for Client {
 
     let file_path = &self.path.join(key);
 
-    tokio::fs::create_dir_all(file_path.parent().unwrap())
-      .await
-      .with_context(|| format!("failed to create directory: {}", key))?;
+    tokio::fs::create_dir_all(
+      file_path
+        .parent()
+        .with_context(|| format!("invalid file path has no parent: {}", key))?,
+    )
+    .await
+    .with_context(|| format!("failed to create directory: {}", key))?;
 
     tokio::fs::write(&file_path, &data)
       .await

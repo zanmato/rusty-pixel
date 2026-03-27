@@ -1,13 +1,12 @@
-use lazy_static::lazy_static;
-use libvips::{ops, VipsImage};
+use std::sync::LazyLock;
+
+use libvips::{VipsImage, ops};
 use regex::Regex;
 
 use super::ImageModifier;
 use crate::image_modifier::util;
 
-lazy_static! {
-  static ref RESIZE_REGEX: Regex = Regex::new(r"^r(w|h)(\d+)$").unwrap();
-}
+static RESIZE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^r(w|h)(\d+)$").unwrap());
 
 pub struct ResizeModifier {
   height: bool,
@@ -37,8 +36,8 @@ impl ImageModifier for ResizeModifier {
           height: self.pixels,
           size: ops::Size::Both,
           crop: ops::Interesting::None,
-          export_profile: "sRGB".to_owned(),
-          import_profile: "sRGB".to_owned(),
+          output_profile: "sRGB".to_owned(),
+          input_profile: "sRGB".to_owned(),
           ..ops::ThumbnailImageOptions::default()
         },
       )?));
@@ -51,8 +50,8 @@ impl ImageModifier for ResizeModifier {
         height: (self.pixels as f64 * util::aspect(img.get_width(), img.get_height())) as i32,
         size: ops::Size::Both,
         crop: ops::Interesting::None,
-        export_profile: "sRGB".to_owned(),
-        import_profile: "sRGB".to_owned(),
+        output_profile: "sRGB".to_owned(),
+        input_profile: "sRGB".to_owned(),
         ..ops::ThumbnailImageOptions::default()
       },
     )?))

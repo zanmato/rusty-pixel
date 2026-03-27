@@ -42,7 +42,7 @@ impl Storage for Client {
       .send()
       .await?;
 
-    let mut data = Vec::with_capacity(object.content_length.unwrap() as usize);
+    let mut data = Vec::with_capacity(object.content_length.unwrap_or(0) as usize);
     object.body.into_async_read().read_to_end(&mut data).await?;
 
     Ok(data)

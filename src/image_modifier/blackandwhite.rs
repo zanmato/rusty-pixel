@@ -1,4 +1,4 @@
-use libvips::{ops, VipsImage};
+use libvips::{VipsImage, ops};
 
 use super::ImageModifier;
 

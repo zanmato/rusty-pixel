@@ -1,4 +1,4 @@
-FROM rust:1.90-alpine3.22 AS chef
+FROM rust:1.94-alpine3.23 AS chef
 WORKDIR /app
 RUN apk add --update --no-cache vips vips-dev build-base musl-dev openssl-dev
 RUN cargo install cargo-chef
@@ -19,7 +19,7 @@ COPY src ./src/
 # Build the application - only rebuilt when source changes
 RUN RUSTFLAGS="-C target-feature=-crt-static $(pkg-config vips --libs)" cargo build --release --locked
 
-FROM alpine:3.22
+FROM alpine:3.23
 ENV GI_TYPELIB_PATH=/usr/lib/girepository-1.0
 
 RUN apk add --update --no-cache vips curl dumb-init
