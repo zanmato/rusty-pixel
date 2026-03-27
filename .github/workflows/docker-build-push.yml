@@ -12,7 +12,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
     - name: Checkout repository
@@ -49,3 +49,28 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    - name: Extract changelog for current version
+      id: changelog
+      run: |
+        VERSION="${GITHUB_REF#refs/tags/v}"
+        CHANGELOG=$(awk -v ver="$VERSION" '
+          /^## \[/ { in_section = 0 }
+          $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
+          in_section && /^## \[/ { exit }
+          in_section { print }
+        ' CHANGELOG.md)
+        echo "body<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        IMAGE="${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+        VERSION="${GITHUB_REF#refs/tags/v}"
+        BODY="${{ steps.changelog.outputs.body }}\n\n**Docker image:** \`${IMAGE}:${VERSION}\`"
+        gh release create "${GITHUB_REF_NAME}" \
+          --title "${GITHUB_REF_NAME}" \
+          --notes "$(echo -e "$BODY")"
