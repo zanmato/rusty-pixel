@@ -70,7 +70,7 @@ pub async fn scale(
       &ops::JpegsaveBufferOptions {
         q: 80,
         background: vec![255.0, 255.0, 255.0],
-        profile: "sRGB".to_owned(),
+        profile: Some("sRGB".to_owned()),
         ..ops::JpegsaveBufferOptions::default()
       },
     ) {

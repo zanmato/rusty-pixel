@@ -98,8 +98,8 @@ impl ImageModifier for ScaleModifier {
           true => ops::Interesting::Centre,
           false => ops::Interesting::None,
         },
-        output_profile: "sRGB".to_owned(),
-        input_profile: "sRGB".to_owned(),
+        output_profile: Some("sRGB".to_owned()),
+        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;

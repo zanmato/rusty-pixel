@@ -137,7 +137,7 @@ pub async fn process_image(
       }
     };
 
-    let loader = match source_image.get_string("vips-loader") {
+    let loader = match source_image.get_as_string("vips-loader") {
       Ok(l) => l,
       Err(e) => {
         let _ = send.send(Err(anyhow!("failed to get vips-loader metadata: {}", e)));
@@ -163,7 +163,7 @@ pub async fn process_image(
         return;
       }
 
-      let alternative_possible = image_processing::alternative_possible(loader);
+      let alternative_possible = image_processing::alternative_possible(&loader);
 
       // Create a lightweight copy of the decoded image for this configuration
       let mut output_image = match ops::copy(&source_image) {
@@ -224,7 +224,7 @@ pub async fn process_image(
         match ops::pngsave_buffer_with_opts(
           &output_image,
           &ops::PngsaveBufferOptions {
-            profile: "sRGB".to_owned(),
+            profile: Some("sRGB".to_owned()),
             ..ops::PngsaveBufferOptions::default()
           },
         ) {
@@ -240,7 +240,7 @@ pub async fn process_image(
           &ops::JpegsaveBufferOptions {
             q: config.quality,
             background: vec![255.0, 255.0, 255.0],
-            profile: "sRGB".to_owned(),
+            profile: Some("sRGB".to_owned()),
             ..ops::JpegsaveBufferOptions::default()
           },
         ) {
@@ -277,7 +277,7 @@ pub async fn process_image(
           &ops::WebpsaveBufferOptions {
             q: config.quality,
             background: vec![255.0, 255.0, 255.0],
-            profile: "sRGB".to_owned(),
+            profile: Some("sRGB".to_owned()),
             ..ops::WebpsaveBufferOptions::default()
           },
         ) {
@@ -304,7 +304,7 @@ pub async fn process_image(
 
     // Upload the given image as well
     if processing_request.save_original {
-      let meta = image_processing::loader_to_mime_ext(loader);
+      let meta = image_processing::loader_to_mime_ext(&loader);
       let _ = tx.blocking_send(UploadImage {
         path: format!("{}.{}", &processing_request.path, meta.1),
         id: processing_request.id.clone(),

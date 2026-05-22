@@ -36,8 +36,8 @@ impl ImageModifier for ResizeModifier {
           height: self.pixels,
           size: ops::Size::Both,
           crop: ops::Interesting::None,
-          output_profile: "sRGB".to_owned(),
-          input_profile: "sRGB".to_owned(),
+          output_profile: Some("sRGB".to_owned()),
+          input_profile: Some("sRGB".to_owned()),
           ..ops::ThumbnailImageOptions::default()
         },
       )?));
@@ -50,8 +50,8 @@ impl ImageModifier for ResizeModifier {
         height: (self.pixels as f64 * util::aspect(img.get_width(), img.get_height())) as i32,
         size: ops::Size::Both,
         crop: ops::Interesting::None,
-        output_profile: "sRGB".to_owned(),
-        input_profile: "sRGB".to_owned(),
+        output_profile: Some("sRGB".to_owned()),
+        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?))

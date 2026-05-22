@@ -37,14 +37,14 @@ impl ImageModifier for EnvironmentModifier {
         height: self.opts.height,
         size: ops::Size::Both,
         crop: ops::Interesting::Centre,
-        output_profile: "sRGB".to_owned(),
-        input_profile: "sRGB".to_owned(),
+        output_profile: Some("sRGB".to_owned()),
+        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;
 
     // composite with env image
-    Ok(Some(ops::composite_2_with_opts(
+    Ok(Some(ops::composite2_with_opts(
       &env_image,
       &scaled,
       ops::BlendMode::DestOver,
