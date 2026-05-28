@@ -61,7 +61,12 @@ impl Storage for Client {
       .content_type(mime)
       .send()
       .await
-      .context("failed to upload object");
+      .with_context(|| {
+        format!(
+          "failed to upload object to bucket {} key {}",
+          self.bucket, key
+        )
+      });
 
     let url = self.base_url.join(key)?.to_string();
 

@@ -331,7 +331,7 @@ pub async fn process_image(
     {
       Ok(r) => r,
       Err(e) => {
-        error!("failed to upload image: {}", e);
+        error!("failed to upload image: {:#}", e);
         rx.close();
         return Err(AppError::InternalServerError(e.to_string()));
       }
