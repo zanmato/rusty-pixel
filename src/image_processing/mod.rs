@@ -61,6 +61,8 @@ pub struct ProcessedImage {
   pub mime: String,
   pub hash: String,
   pub size: u64,
+  pub width: i32,
+  pub height: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,8 @@ pub struct UploadImage {
   pub mime: String,
   pub path: String,
   pub data: Arc<Vec<u8>>,
+  pub width: i32,
+  pub height: i32,
 }
 
 pub fn loader_to_mime_ext(loader: &str) -> (&'static str, &'static str) {

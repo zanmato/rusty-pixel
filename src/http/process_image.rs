@@ -90,11 +90,10 @@ pub async fn process_image(
     .map_err(|_| AppError::InternalServerError("orientation detection failed".into()))??;
   let image_portrait = image_size.0 < image_size.1;
 
-  if let Some(min_size) = processing_request.min_size {
-    if image_size.0 < min_size && image_size.1 < min_size {
+  if let Some(min_size) = processing_request.min_size
+    && image_size.0 < min_size && image_size.1 < min_size {
       return Err(AppError::BadRequest("image too small".to_owned()));
     }
-  }
 
   let environment_image_conf = if image_portrait {
     processing_request.portrait_environment_image.as_ref()
@@ -154,6 +153,8 @@ pub async fn process_image(
           id: config.id.clone(),
           data: data.clone(),
           alternative_to: None,
+          width: source_image.get_width(),
+          height: source_image.get_height(),
         }) {
           let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
           return;
@@ -197,8 +198,8 @@ pub async fn process_image(
         !config.conditions.trim,
       )));
 
-      if config.conditions.use_environment_image {
-        if let (Some(env_img), Some(env_opts)) = (&environment_image, &environment_image_opts) {
+      if config.conditions.use_environment_image
+        && let (Some(env_img), Some(env_opts)) = (&environment_image, &environment_image_opts) {
           modifiers.push(Box::new(
             image_modifier::environment::EnvironmentModifier::new(
               env_img.clone(),
@@ -206,7 +207,6 @@ pub async fn process_image(
             ),
           ));
         }
-      }
 
       for opt in modifiers {
         match opt.apply(&output_image) {
@@ -265,6 +265,8 @@ pub async fn process_image(
         id: config.id.clone(),
         data: image_data,
         alternative_to: None,
+        width: output_image.get_width(),
+        height: output_image.get_height(),
       }) {
         let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
         return;
@@ -295,6 +297,8 @@ pub async fn process_image(
           data: webp_data,
           mime: "image/webp".to_owned(),
           alternative_to: Some(config.id.clone()),
+          width: output_image.get_width(),
+          height: output_image.get_height(),
         }) {
           let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
           return;
@@ -311,6 +315,8 @@ pub async fn process_image(
         data,
         mime: meta.0.to_owned(),
         alternative_to: None,
+        width: source_image.get_width(),
+        height: source_image.get_height(),
       });
     }
 
@@ -345,6 +351,8 @@ pub async fn process_image(
       url: upload_res.url,
       mime: img.mime,
       alternative_to: img.alternative_to,
+      width: img.width,
+      height: img.height,
     });
   }
 

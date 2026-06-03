@@ -152,6 +152,23 @@ async fn process_image() {
     .expect("failed to send request");
 
   assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+  let body = response.text().await.expect("failed to read response");
+  let body: serde_json::Value = serde_json::from_str(&body).expect("failed to parse response");
+  let images = body
+    .as_array()
+    .expect("expected an array of processed images");
+  assert!(!images.is_empty(), "expected at least one processed image");
+  for image in images {
+    assert!(
+      image["width"].as_i64().unwrap_or(0) > 0,
+      "expected non-zero width for {image:?}"
+    );
+    assert!(
+      image["height"].as_i64().unwrap_or(0) > 0,
+      "expected non-zero height for {image:?}"
+    );
+  }
 }
 
 #[tokio::test]
