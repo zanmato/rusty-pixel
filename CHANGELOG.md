@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Added `width` and `height` to the output
+- Added width and height to the output
 - Improved error logging
 
 ## [0.1.4] - 2026-03-27
