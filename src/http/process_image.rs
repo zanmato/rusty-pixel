@@ -164,7 +164,8 @@ pub async fn process_image(
         return;
       }
 
-      let alternative_possible = image_processing::alternative_possible(&loader);
+      let alternative_possible =
+        image_processing::alternative_possible(&loader, config.conditions.allow_vector);
 
       // Create a lightweight copy of the decoded image for this configuration
       let mut output_image = match ops::copy(&source_image) {

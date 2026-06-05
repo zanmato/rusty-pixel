@@ -169,6 +169,47 @@ async fn process_image() {
       "expected non-zero height for {image:?}"
     );
   }
+
+  // A PNG upload should produce a WebP alternative for each configuration,
+  // linked back to its primary image via `alternative_to`.
+  let primary_ids: Vec<&str> = images
+    .iter()
+    .filter(|image| image["alternative_to"].is_null())
+    .filter_map(|image| image["id"].as_str())
+    .collect();
+
+  let alternatives: Vec<&serde_json::Value> = images
+    .iter()
+    .filter(|image| !image["alternative_to"].is_null())
+    .collect();
+
+  assert_eq!(
+    alternatives.len(),
+    2,
+    "expected one WebP alternative per configuration, got {alternatives:?}"
+  );
+
+  for alternative in alternatives {
+    assert_eq!(
+      alternative["mime"].as_str(),
+      Some("image/webp"),
+      "expected alternative to be a WebP for {alternative:?}"
+    );
+    assert!(
+      alternative["path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with(".webp")),
+      "expected alternative path to end with .webp for {alternative:?}"
+    );
+
+    let parent = alternative["alternative_to"]
+      .as_str()
+      .expect("alternative_to should be a string");
+    assert!(
+      primary_ids.contains(&parent),
+      "alternative_to {parent:?} does not reference a primary image id in {primary_ids:?}"
+    );
+  }
 }
 
 #[tokio::test]

@@ -94,14 +94,14 @@ pub fn loader_to_mime_ext(loader: &str) -> (&'static str, &'static str) {
   }
 }
 
-pub fn alternative_possible(loader: &str) -> bool {
+pub fn alternative_possible(loader: &str, allow_vector: bool) -> bool {
   match loader {
     "jpegload_buffer" => true,
     "jxlload_buffer" => true,
     "magickload_buffer" => true,
     "pngload_buffer" => true,
     "radload_buffer" => false,
-    "svgload_buffer" => false,
+    "svgload_buffer" => !allow_vector,
     "tiffload_buffer" => true,
     "webpload_buffer" => true,
     "pdfload_buffer" => false,
