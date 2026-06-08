@@ -326,3 +326,151 @@ async fn process_image_missing_fields() {
 
   assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn process_svg_without_allow_vector() {
+  let router = bootstrap().clone();
+
+  let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+  let addr = listener.local_addr().unwrap();
+
+  tokio::spawn(async move {
+    axum::serve(listener, router).await.unwrap();
+  });
+
+  // An SVG uploaded without `allow_vector` should be rasterized and still
+  // produce a WebP alternative for the configuration.
+  let json_request = r#"{
+    "id": "svg-original",
+    "path": "output",
+    "save_original": false,
+    "generate_alternative": false,
+    "max_age": 31536000,
+    "configurations": [
+      {
+        "id": "svg-config",
+        "path": "output_svg",
+        "aspect": 1.33,
+        "margin_percent": 10,
+        "size": 1024,
+        "quality": 80,
+        "conditions": {
+          "use_original_mime": false,
+          "allow_vector": false,
+          "transparent": false,
+          "trim": false,
+          "black_and_white": false,
+          "option_id": "uuid",
+          "use_environment_image": false
+        }
+      }
+    ]
+  }"#;
+
+  let json_part = reqwest::multipart::Part::text(json_request);
+
+  let file = fs::read("tests/testdata/skaune.svg")
+    .await
+    .expect("failed to read file");
+  let file_part = reqwest::multipart::Part::bytes(file)
+    .file_name("skaune.svg")
+    .mime_str("image/svg+xml")
+    .unwrap();
+
+  let form = reqwest::multipart::Form::new()
+    .part("image", file_part)
+    .part("details", json_part);
+
+  let client = reqwest::Client::new();
+
+  let response = client
+    .post(&format!(
+      "http://{}:{}/api/v1/process-image",
+      addr.ip(),
+      addr.port()
+    ))
+    .header("X-API-Key", "test")
+    .multipart(form)
+    .send()
+    .await
+    .expect("failed to send request");
+
+  assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+  let body = response.text().await.expect("failed to read response");
+  let body: serde_json::Value = serde_json::from_str(&body).expect("failed to parse response");
+  let images = body
+    .as_array()
+    .expect("expected an array of processed images");
+  assert!(!images.is_empty(), "expected at least one processed image");
+
+  // The main image must be rasterized, not passed through as SVG, since
+  // allow_vector is false.
+  let primaries: Vec<&serde_json::Value> = images
+    .iter()
+    .filter(|image| image["alternative_to"].is_null())
+    .collect();
+
+  assert_eq!(
+    primaries.len(),
+    1,
+    "expected exactly one primary image, got {primaries:?}"
+  );
+
+  for primary in &primaries {
+    assert_ne!(
+      primary["mime"].as_str(),
+      Some("image/svg+xml"),
+      "expected main image to be rasterized when allow_vector is false, got {primary:?}"
+    );
+    assert_eq!(
+      primary["mime"].as_str(),
+      Some("image/jpeg"),
+      "expected main image to be a JPEG when allow_vector is false, got {primary:?}"
+    );
+    assert!(
+      primary["path"]
+        .as_str()
+        .is_some_and(|path| !path.ends_with(".svg")),
+      "expected main image path to not end with .svg for {primary:?}"
+    );
+  }
+
+  let primary_ids: Vec<&str> = primaries
+    .iter()
+    .filter_map(|image| image["id"].as_str())
+    .collect();
+
+  let alternatives: Vec<&serde_json::Value> = images
+    .iter()
+    .filter(|image| !image["alternative_to"].is_null())
+    .collect();
+
+  assert_eq!(
+    alternatives.len(),
+    1,
+    "expected one WebP alternative for the SVG configuration, got {alternatives:?}"
+  );
+
+  for alternative in alternatives {
+    assert_eq!(
+      alternative["mime"].as_str(),
+      Some("image/webp"),
+      "expected alternative to be a WebP for {alternative:?}"
+    );
+    assert!(
+      alternative["path"]
+        .as_str()
+        .is_some_and(|path| path.ends_with(".webp")),
+      "expected alternative path to end with .webp for {alternative:?}"
+    );
+
+    let parent = alternative["alternative_to"]
+      .as_str()
+      .expect("alternative_to should be a string");
+    assert!(
+      primary_ids.contains(&parent),
+      "alternative_to {parent:?} does not reference a primary image id in {primary_ids:?}"
+    );
+  }
+}
