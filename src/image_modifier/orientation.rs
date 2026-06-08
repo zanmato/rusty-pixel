@@ -23,14 +23,12 @@ impl ImageModifier for OrientationModifier {
     if (self.portrait && img.get_width() > img.get_height())
       || (!self.portrait && img.get_height() > img.get_width())
     {
-      return Ok(Some(ops::rotate_with_opts(
-        img,
-        90.0,
-        &ops::RotateOptions {
-          background: vec![255.0, 255.0, 255.0],
-          ..ops::RotateOptions::default()
-        },
-      )?));
+      // Use the exact 90-degree rotate (`vips_rot`) rather than the arbitrary-angle
+      // `rotate_with_opts`: the latter's generated binding always passes the static
+      // `interpolate` singleton, whose refcount libvips corrupts over repeated calls,
+      // causing a `g_object_unref` crash under load. `rot` needs no interpolation or
+      // background and swaps the dimensions exactly.
+      return Ok(Some(ops::rot(img, ops::Angle::D90)?));
     }
 
     Ok(None)
