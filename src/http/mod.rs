@@ -30,7 +30,7 @@ use libvips::VipsApp;
 
 mod error;
 mod local_storage;
-mod metrics;
+pub mod metrics;
 mod process_image;
 mod s3;
 mod scale_image;
@@ -76,7 +76,10 @@ struct AppState {
   storage_client: Arc<dyn storage::Storage>,
   vips_app: Arc<VipsApp>,
   api_key: String,
+  upload_concurrency: usize,
 }
+
+const DEFAULT_UPLOAD_CONCURRENCY: usize = 4;
 
 const X_API_KEY: &str = "X-API-Key";
 
@@ -119,6 +122,23 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
   vips_app.cache_set_max_mem(0);
   vips_app.cache_set_max(0);
   vips_app.cache_set_max_files(0);
+
+  // Size the worker pool. The global pool can only be built once per process,
+  // which matters for tests that bootstrap more than once.
+  let worker_threads = cfg
+    .app
+    .worker_threads
+    .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+  if let Err(e) = rayon::ThreadPoolBuilder::new()
+    .num_threads(worker_threads)
+    .thread_name(|i| format!("image-worker-{i}"))
+    .build_global()
+  {
+    tracing::warn!(
+      "worker pool already initialised, keeping existing size: {}",
+      e
+    );
+  }
 
   // Init storage client
   let storage_client: Arc<dyn storage::Storage> = match cfg.storage.storage_type {
@@ -164,6 +184,11 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
     storage_client,
     vips_app,
     api_key: cfg.app.api_key.clone(),
+    upload_concurrency: cfg
+      .app
+      .upload_concurrency
+      .unwrap_or(DEFAULT_UPLOAD_CONCURRENCY)
+      .max(1),
   };
 
   // Routing

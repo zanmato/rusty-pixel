@@ -3,6 +3,7 @@ use std::sync::Arc;
 use libvips::{VipsImage, ops};
 
 use super::ImageModifier;
+use crate::image_processing::SharedImage;
 
 #[derive(Clone)]
 pub struct EnvironmentOptions {
@@ -13,22 +14,21 @@ pub struct EnvironmentOptions {
   pub margin_percent: i32,
 }
 
+/// Composites the image onto a decoded environment image. The environment
+/// image is decoded once per request and shared between configurations.
 pub struct EnvironmentModifier {
-  env_image: Arc<Vec<u8>>,
+  env_image: Arc<SharedImage>,
   opts: EnvironmentOptions,
 }
 
 impl EnvironmentModifier {
-  pub fn new(env_image: Arc<Vec<u8>>, opts: EnvironmentOptions) -> EnvironmentModifier {
+  pub fn new(env_image: Arc<SharedImage>, opts: EnvironmentOptions) -> EnvironmentModifier {
     EnvironmentModifier { env_image, opts }
   }
 }
 
 impl ImageModifier for EnvironmentModifier {
   fn apply(&self, img: &VipsImage) -> Result<Option<VipsImage>, Box<dyn std::error::Error>> {
-    let env_image = VipsImage::new_from_buffer(&self.env_image, "")
-      .map_err(|e| format!("failed to load environment image: {}", e))?;
-
     // scale input image
     let scaled = ops::thumbnail_image_with_opts(
       img,
@@ -45,7 +45,7 @@ impl ImageModifier for EnvironmentModifier {
 
     // composite with env image
     Ok(Some(ops::composite2_with_opts(
-      &env_image,
+      &self.env_image,
       &scaled,
       ops::BlendMode::DestOver,
       &ops::Composite2Options {

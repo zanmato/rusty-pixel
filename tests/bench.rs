@@ -27,9 +27,8 @@ fn large_jpeg() -> Vec<u8> {
     },
   )
   .unwrap();
-  let flat = ops::flatten(&img).unwrap();
   let data = ops::jpegsave_buffer_with_opts(
-    &flat,
+    &img,
     &ops::JpegsaveBufferOptions {
       q: 90,
       ..ops::JpegsaveBufferOptions::default()
@@ -87,6 +86,8 @@ async fn process_image_throughput() {
       vips_concurrency: 1,
       max_body_size_mb: 100,
       enable_openapi: Some(false),
+      worker_threads: None,
+      upload_concurrency: None,
       listen: "0.0.0.0:0".to_string(),
       metrics_listen: "0.0.0.0:0".to_string(),
     },

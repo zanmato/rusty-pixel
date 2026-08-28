@@ -18,6 +18,8 @@ fn bootstrap() -> &'static axum::Router {
         vips_concurrency: 1,
         max_body_size_mb: 10,
         enable_openapi: Some(false),
+        worker_threads: None,
+        upload_concurrency: None,
         listen: "0.0.0.0:0".to_string(),
         metrics_listen: "0.0.0.0:0".to_string(),
       },

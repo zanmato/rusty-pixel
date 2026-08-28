@@ -22,6 +22,12 @@ pub struct AppConfig {
   pub api_key: String,
   pub max_body_size_mb: usize,
   pub enable_openapi: Option<bool>,
+  /// Size of the image processing thread pool. Defaults to the number of CPUs.
+  /// Each worker also drives `vips_concurrency` libvips threads, so keep the
+  /// product of the two close to the CPU count.
+  pub worker_threads: Option<usize>,
+  /// How many uploads to storage may be in flight per request. Defaults to 4.
+  pub upload_concurrency: Option<usize>,
 }
 
 #[derive(Deserialize)]

@@ -1,7 +1,9 @@
-use std::sync::Arc;
-
+use axum::body::Bytes;
+use libvips::VipsImage;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+pub mod pipeline;
 
 #[derive(Deserialize, ToSchema)]
 #[allow(unused)]
@@ -65,15 +67,45 @@ pub struct ProcessedImage {
   pub height: i32,
 }
 
+/// An encoded output waiting to be uploaded.
 #[derive(Debug, Clone)]
 pub struct UploadImage {
+  /// Position in the response, so results keep the order of the request even
+  /// though configurations are processed in parallel.
+  pub order: usize,
   pub id: String,
   pub alternative_to: Option<String>,
   pub mime: String,
   pub path: String,
-  pub data: Arc<Vec<u8>>,
+  pub data: Bytes,
   pub width: i32,
   pub height: i32,
+}
+
+/// A decoded libvips image that may be read from several threads at once.
+///
+/// `VipsImage` wraps a raw pointer and is therefore neither `Send` nor `Sync`
+/// in the binding, but libvips itself is designed for exactly this: images are
+/// reference counted GObjects and reading pixels from one image on several
+/// threads is supported and is how libvips' own thread pool works. Only
+/// reading is exposed here (`Deref` to `&VipsImage`), never mutation.
+pub struct SharedImage(VipsImage);
+
+unsafe impl Send for SharedImage {}
+unsafe impl Sync for SharedImage {}
+
+impl SharedImage {
+  pub fn new(img: VipsImage) -> Self {
+    SharedImage(img)
+  }
+}
+
+impl std::ops::Deref for SharedImage {
+  type Target = VipsImage;
+
+  fn deref(&self) -> &VipsImage {
+    &self.0
+  }
 }
 
 pub fn loader_to_mime_ext(loader: &str) -> (&'static str, &'static str) {

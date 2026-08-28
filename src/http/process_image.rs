@@ -1,17 +1,20 @@
-use crate::image_modifier;
+use crate::image_modifier::environment::EnvironmentOptions;
+use crate::image_processing::pipeline::{self, Environment, Pipeline, PipelineError};
 use crate::image_processing::{
-  self, ImageProcessingRequest, ProcessImageForm, ProcessedImage, UploadImage,
+  ImageProcessingRequest, ProcessImageForm, ProcessedImage, UploadImage,
 };
 
-use anyhow::anyhow;
 use axum::{
   Json,
+  body::Bytes,
   extract::{self, State},
 };
-use libvips::{VipsImage, ops};
-use std::sync::Arc;
+use std::sync::{
+  Arc,
+  atomic::{AtomicBool, Ordering},
+};
+use tokio::task::JoinSet;
 use tracing::{Span, error, info};
-use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::error::AppError;
@@ -35,7 +38,7 @@ pub async fn process_image(
   mut multipart: extract::Multipart,
 ) -> Result<axum::Json<Vec<ProcessedImage>>, AppError> {
   let mut processing_request: Option<ImageProcessingRequest> = None;
-  let mut uploaded_image: Option<axum::body::Bytes> = None;
+  let mut uploaded_image: Option<Bytes> = None;
 
   while let Some(field) = multipart
     .next_field()
@@ -65,54 +68,50 @@ pub async fn process_image(
     }
   }
 
-  let (processing_request, uploaded_image) = match (processing_request, uploaded_image) {
+  let (processing_request, data) = match (processing_request, uploaded_image) {
     (Some(pr), Some(ui)) => (pr, ui),
     _ => return Err(AppError::BadRequest("missing image or details".to_owned())),
   };
-  let data = Arc::new(uploaded_image.to_vec());
 
-  let (image_portrait_sender, image_portrait_recv) = tokio::sync::oneshot::channel();
+  // Flag the worker when this future is dropped, which happens when the client
+  // disconnects or the timeout layer gives up on the request.
+  let cancel = Arc::new(AtomicBool::new(false));
+  let _cancel_guard = CancelOnDrop(cancel.clone());
 
-  let orientation_data = data.clone();
-  rayon::spawn(move || {
-    let image = match VipsImage::new_from_buffer(&orientation_data, "") {
-      Ok(i) => i,
-      Err(e) => {
-        let _ = image_portrait_sender.send(Err(AppError::BadRequest(e.to_string())));
-        return;
-      }
-    };
-
-    let _ = image_portrait_sender.send(Ok((image.get_width(), image.get_height())));
-  });
-
-  let image_size = image_portrait_recv
-    .await
-    .map_err(|_| AppError::InternalServerError("orientation detection failed".into()))??;
-  let image_portrait = image_size.0 < image_size.1;
+  // Read the header on the pool, libvips is not called from async threads
+  let source = {
+    let data = data.clone();
+    let vips = state.vips_app.clone();
+    let span = Span::current();
+    run_on_pool(move || {
+      let _guard = span.enter();
+      pipeline::source_info(&data, &vips)
+    })
+    .await?
+  };
 
   if let Some(min_size) = processing_request.min_size
-    && image_size.0 < min_size
-    && image_size.1 < min_size
+    && source.width < min_size
+    && source.height < min_size
   {
     return Err(AppError::BadRequest("image too small".to_owned()));
   }
 
-  let environment_image_conf = if image_portrait {
+  let environment_image_conf = if source.is_portrait() {
     processing_request.portrait_environment_image.as_ref()
   } else {
     processing_request.landscape_environment_image.as_ref()
   };
 
-  // Download the environment image from storage if there is one
-  let (environment_image, environment_image_opts) = if let Some(env_conf) = environment_image_conf {
+  // Download and decode the environment image once for all configurations
+  let environment = if let Some(env_conf) = environment_image_conf {
     let object_data = state
       .storage_client
       .download_object(&env_conf.path)
       .await
       .map_err(|_| AppError::NotFound)?;
 
-    let opts = image_modifier::environment::EnvironmentOptions {
+    let opts = EnvironmentOptions {
       width: env_conf.width,
       height: env_conf.height,
       x: env_conf.x,
@@ -120,246 +119,130 @@ pub async fn process_image(
       margin_percent: env_conf.margin_percent,
     };
 
-    (Some(Arc::new(object_data)), Some(opts))
+    let vips = state.vips_app.clone();
+    Some(run_on_pool(move || Environment::decode(&object_data, opts, &vips)).await?)
   } else {
-    (None, None)
+    None
   };
-
-  let (send, recv) = tokio::sync::oneshot::channel();
-  let (tx, mut rx) = tokio::sync::mpsc::channel(processing_request.configurations.len().max(1));
 
   ::metrics::histogram!(metrics::CONFIGURATIONS)
     .record(processing_request.configurations.len() as f64);
 
-  // Run the image transformation in a thread from the thread pool
+  let (send, recv) = tokio::sync::oneshot::channel();
+  let (tx, mut rx) = tokio::sync::mpsc::channel(processing_request.configurations.len().max(1) * 2);
+
+  let pipeline = Pipeline {
+    data,
+    source,
+    request: processing_request,
+    environment,
+    vips: state.vips_app.clone(),
+    cancel,
+  };
+
+  // Run the image transformation on the thread pool
   let span = Span::current();
   let queued = Timer::start();
   rayon::spawn(move || {
     let _guard = span.enter();
     queued.observe(metrics::QUEUE_WAIT);
     let processing = Timer::start();
-    // Decode the image once and reuse across all configurations
-    let source_image = match VipsImage::new_from_buffer(&data, "") {
-      Ok(i) => i,
-      Err(e) => {
-        let _ = send.send(Err(anyhow!("failed to create image from buffer: {}", e)));
-        return;
-      }
-    };
 
-    let loader = match source_image.get_as_string("vips-loader") {
-      Ok(l) => l,
-      Err(e) => {
-        let _ = send.send(Err(anyhow!("failed to get vips-loader metadata: {}", e)));
-        return;
-      }
-    };
-
-    for config in processing_request.configurations {
-      // Pass the image as is
-      if config.conditions.allow_vector && loader == "svgload_buffer" {
-        if let Err(e) = tx.blocking_send(UploadImage {
-          path: format!("{}.svg", &config.path),
-          mime: "image/svg+xml".to_string(),
-          id: config.id.clone(),
-          data: data.clone(),
-          alternative_to: None,
-          width: source_image.get_width(),
-          height: source_image.get_height(),
-        }) {
-          let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
-          return;
-        }
-
-        let _ = send.send(Ok(()));
-        return;
-      }
-
-      let alternative_possible =
-        image_processing::alternative_possible(&loader, config.conditions.allow_vector);
-
-      // Create a lightweight copy of the decoded image for this configuration
-      let mut output_image = match ops::copy(&source_image) {
-        Ok(img) => img,
-        Err(e) => {
-          let _ = send.send(Err(anyhow!("failed to copy source image: {}", e)));
-          return;
-        }
-      };
-
-      // Build a vector of modifiers to apply to the image
-      let mut modifiers: Vec<Box<dyn image_modifier::ImageModifier>> = Vec::new();
-
-      if config.conditions.black_and_white {
-        modifiers.push(Box::new(
-          image_modifier::blackandwhite::BlackAndWhiteModifier,
-        ));
-      }
-
-      if config.conditions.trim {
-        modifiers.push(Box::new(image_modifier::trim::TrimModifier::new(vec![
-          255.0, 255.0, 255.0,
-        ])));
-      }
-
-      // If we are trimming, don't crop the resulting image
-      modifiers.push(Box::new(image_modifier::scale::ScaleModifier::new(
-        config.aspect,
-        config.margin_percent,
-        Some(config.size),
-        !config.conditions.trim,
-      )));
-
-      if config.conditions.use_environment_image
-        && let (Some(env_img), Some(env_opts)) = (&environment_image, &environment_image_opts)
-      {
-        modifiers.push(Box::new(
-          image_modifier::environment::EnvironmentModifier::new(env_img.clone(), env_opts.clone()),
-        ));
-      }
-
-      for opt in modifiers {
-        match opt.apply(&output_image) {
-          Err(e) => {
-            let _ = send.send(Err(anyhow!("failed to apply modifier: {}", e)));
-            return;
-          }
-          Ok(Some(m)) => output_image = m,
-          Ok(None) => {}
-        }
-      }
-
-      // Save as png if the image is transparent
-      let image_data = if config.conditions.transparent {
-        match ops::pngsave_buffer_with_opts(
-          &output_image,
-          &ops::PngsaveBufferOptions {
-            profile: Some("sRGB".to_owned()),
-            ..ops::PngsaveBufferOptions::default()
-          },
-        ) {
-          Ok(data) => Arc::new(data),
-          Err(e) => {
-            let _ = send.send(Err(anyhow!("failed to save image: {}", e)));
-            return;
-          }
-        }
-      } else {
-        match ops::jpegsave_buffer_with_opts(
-          &output_image,
-          &ops::JpegsaveBufferOptions {
-            q: config.quality,
-            background: vec![255.0, 255.0, 255.0],
-            profile: Some("sRGB".to_owned()),
-            ..ops::JpegsaveBufferOptions::default()
-          },
-        ) {
-          Ok(data) => Arc::new(data),
-          Err(e) => {
-            let _ = send.send(Err(anyhow!("failed to save image: {}", e)));
-            return;
-          }
-        }
-      };
-
-      let (ext, mime) = if config.conditions.transparent {
-        ("png", "image/png")
-      } else {
-        ("jpg", "image/jpeg")
-      };
-
-      // Pass the resulting image via the channel
-      if let Err(e) = tx.blocking_send(UploadImage {
-        path: format!("{}.{}", &config.path, ext),
-        mime: mime.to_owned(),
-        id: config.id.clone(),
-        data: image_data,
-        alternative_to: None,
-        width: output_image.get_width(),
-        height: output_image.get_height(),
-      }) {
-        let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
-        return;
-      }
-
-      // Generate an alternative format if possible
-      if alternative_possible {
-        let webp_data = match ops::webpsave_buffer_with_opts(
-          &output_image,
-          &ops::WebpsaveBufferOptions {
-            q: config.quality,
-            background: vec![255.0, 255.0, 255.0],
-            profile: Some("sRGB".to_owned()),
-            ..ops::WebpsaveBufferOptions::default()
-          },
-        ) {
-          Ok(data) => Arc::new(data),
-          Err(e) => {
-            let _ = send.send(Err(anyhow!("failed to save image: {}", e)));
-            return;
-          }
-        };
-
-        let alternative_id = Uuid::new_v4();
-        if let Err(e) = tx.blocking_send(UploadImage {
-          path: format!("{}.webp", &config.path),
-          id: alternative_id.into(),
-          data: webp_data,
-          mime: "image/webp".to_owned(),
-          alternative_to: Some(config.id.clone()),
-          width: output_image.get_width(),
-          height: output_image.get_height(),
-        }) {
-          let _ = send.send(Err(anyhow!("failed to send image: {}", e)));
-          return;
-        }
-      }
-    }
-
-    // Upload the given image as well
-    if processing_request.save_original {
-      let meta = image_processing::loader_to_mime_ext(&loader);
-      let _ = tx.blocking_send(UploadImage {
-        path: format!("{}.{}", &processing_request.path, meta.1),
-        id: processing_request.id.clone(),
-        data,
-        mime: meta.0.to_owned(),
-        alternative_to: None,
-        width: source_image.get_width(),
-        height: source_image.get_height(),
-      });
-    }
+    let result = pipeline.run(tx);
 
     processing.observe(metrics::PROCESS_DURATION);
-    let _ = send.send(Ok(()));
+    let _ = send.send(result);
   });
 
-  let mut processed_images = Vec::new();
-  while let Some(img) = rx.recv().await {
-    // Upload image
-    let data = match Arc::try_unwrap(img.data) {
-      Ok(data) => data,
-      Err(arc) => (*arc).clone(),
-    };
-    let upload = Timer::start();
-    let upload_res = match state
-      .storage_client
-      .upload_object(data, &img.path, &img.mime)
-      .await
-    {
-      Ok(r) => {
-        upload.observe(metrics::UPLOAD_DURATION);
-        r
-      }
-      Err(e) => {
-        ::metrics::counter!(metrics::UPLOAD_ERRORS).increment(1);
-        error!("failed to upload image: {:#}", e);
-        rx.close();
-        return Err(AppError::InternalServerError(e.to_string()));
+  // Upload outputs as they are produced, a few at a time
+  let mut uploads: JoinSet<UploadResult> = JoinSet::new();
+  let mut processed_images: Vec<(usize, ProcessedImage)> = Vec::new();
+
+  let mut finish =
+    |result: Option<Result<UploadResult, tokio::task::JoinError>>| -> Result<(), AppError> {
+      match result {
+        Some(Ok(Ok(image))) => {
+          processed_images.push(image);
+          Ok(())
+        }
+        Some(Ok(Err(e))) => Err(e),
+        Some(Err(e)) => Err(AppError::InternalServerError(format!(
+          "upload task failed: {}",
+          e
+        ))),
+        None => Ok(()),
       }
     };
 
-    processed_images.push(ProcessedImage {
+  while let Some(img) = rx.recv().await {
+    if uploads.len() >= state.upload_concurrency {
+      finish(uploads.join_next().await)?;
+    }
+
+    let storage = state.storage_client.clone();
+    let span = Span::current();
+    uploads.spawn(async move {
+      let _guard = span.enter();
+      upload(storage, img).await
+    });
+  }
+
+  while !uploads.is_empty() {
+    finish(uploads.join_next().await)?;
+  }
+
+  match recv.await {
+    Ok(Ok(())) => {}
+    Ok(Err(PipelineError::InvalidImage(msg))) => return Err(AppError::BadRequest(msg)),
+    Ok(Err(PipelineError::Cancelled)) => {
+      info!("image processing cancelled");
+      return Err(AppError::InternalServerError("cancelled".to_owned()));
+    }
+    Ok(Err(PipelineError::Failed(msg))) => {
+      error!("image processing failed: {}", msg);
+      return Err(AppError::InternalServerError(msg));
+    }
+    Err(recv_err) => {
+      error!(
+        "image processing task panicked or was dropped: {}",
+        recv_err
+      );
+      return Err(AppError::InternalServerError(recv_err.to_string()));
+    }
+  }
+
+  processed_images.sort_by_key(|(order, _)| *order);
+
+  info!(images = processed_images.len(), "processed image");
+
+  Ok(Json(
+    processed_images
+      .into_iter()
+      .map(|(_, image)| image)
+      .collect(),
+  ))
+}
+
+type UploadResult = Result<(usize, ProcessedImage), AppError>;
+
+async fn upload(
+  storage: Arc<dyn crate::http::storage::Storage>,
+  img: UploadImage,
+) -> Result<(usize, ProcessedImage), AppError> {
+  let timer = Timer::start();
+  let upload_res = match storage.upload_object(img.data, &img.path, &img.mime).await {
+    Ok(r) => r,
+    Err(e) => {
+      ::metrics::counter!(metrics::UPLOAD_ERRORS).increment(1);
+      error!("failed to upload image {}: {:#}", img.path, e);
+      return Err(AppError::InternalServerError(e.to_string()));
+    }
+  };
+  timer.observe(metrics::UPLOAD_DURATION);
+
+  Ok((
+    img.order,
+    ProcessedImage {
       id: img.id,
       path: img.path,
       hash: upload_res.etag,
@@ -369,18 +252,33 @@ pub async fn process_image(
       alternative_to: img.alternative_to,
       width: img.width,
       height: img.height,
-    });
+    },
+  ))
+}
+
+/// Run a short blocking job on the rayon pool and await its result.
+async fn run_on_pool<T, F>(job: F) -> Result<T, AppError>
+where
+  T: Send + 'static,
+  F: FnOnce() -> Result<T, PipelineError> + Send + 'static,
+{
+  let (send, recv) = tokio::sync::oneshot::channel();
+  rayon::spawn(move || {
+    let _ = send.send(job());
+  });
+
+  match recv.await {
+    Ok(Ok(value)) => Ok(value),
+    Ok(Err(PipelineError::InvalidImage(msg))) => Err(AppError::BadRequest(msg)),
+    Ok(Err(e)) => Err(AppError::InternalServerError(e.to_string())),
+    Err(_) => Err(AppError::InternalServerError("worker dropped".to_owned())),
   }
+}
 
-  if let Err(recv_err) = recv.await {
-    error!("failed to receive: {}", recv_err);
-    rx.close();
-    return Err(AppError::InternalServerError(recv_err.to_string()));
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+  fn drop(&mut self) {
+    self.0.store(true, Ordering::Relaxed);
   }
-
-  rx.close();
-
-  info!(images = processed_images.len(), "processed image");
-
-  Ok(Json(processed_images))
 }

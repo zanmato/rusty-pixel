@@ -2,6 +2,7 @@ use crate::http::storage::{PutObjectOutput, Storage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::ByteStream;
+use axum::body::Bytes;
 use tokio::io::AsyncReadExt;
 use tracing::debug;
 use url::Url;
@@ -48,7 +49,7 @@ impl Storage for Client {
     Ok(data)
   }
 
-  async fn upload_object(&self, data: Vec<u8>, key: &str, mime: &str) -> Result<PutObjectOutput> {
+  async fn upload_object(&self, data: Bytes, key: &str, mime: &str) -> Result<PutObjectOutput> {
     let size = data.len() as u64;
     let body = ByteStream::from(data);
     let res = self
