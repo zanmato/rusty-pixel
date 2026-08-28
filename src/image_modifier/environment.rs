@@ -38,7 +38,6 @@ impl ImageModifier for EnvironmentModifier {
         size: ops::Size::Both,
         crop: ops::Interesting::Centre,
         output_profile: Some("sRGB".to_owned()),
-        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;

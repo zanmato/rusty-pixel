@@ -20,6 +20,9 @@ fn bootstrap() -> &'static axum::Router {
         enable_openapi: Some(false),
         worker_threads: None,
         upload_concurrency: None,
+        max_output_dimension: None,
+        scale_quality: None,
+        scale_cache_control: None,
         listen: "0.0.0.0:0".to_string(),
         metrics_listen: "0.0.0.0:0".to_string(),
       },
@@ -217,6 +220,39 @@ async fn process_image() {
 }
 
 #[tokio::test]
+async fn scale_image_converts_to_srgb() {
+  let router = bootstrap().clone();
+
+  // Solid sRGB red stored as Display P3 with the profile embedded. Its raw
+  // pixel values are roughly (234, 51, 35). The orientation option is a no op
+  // on this landscape image, so no thumbnail converts the colours on the way.
+  let response = router
+    .oneshot(
+      Request::builder()
+        .uri("/scale/olandscape/red-p3.jpg")
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+  assert_eq!(response.status(), StatusCode::OK);
+
+  let body = response.into_body().collect().await.unwrap().to_bytes();
+  let image = libvips::VipsImage::new_from_buffer(&body, "").unwrap();
+  let pixel = libvips::ops::getpoint(&image, 32, 24).unwrap();
+  let expected = [255.0, 0.0, 0.0];
+  for (got, want) in pixel.iter().zip(expected) {
+    assert!(
+      (got - want).abs() <= 6.0,
+      "expected roughly {:?}, got {:?}",
+      expected,
+      pixel
+    );
+  }
+}
+
+#[tokio::test]
 async fn scale_image_not_found() {
   let router = bootstrap().clone();
 
@@ -247,8 +283,8 @@ async fn scale_image_invalid_options() {
     .await
     .unwrap();
 
-  // Invalid options produce an error since no modifiers are parsed
-  assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+  // Invalid options are rejected before storage is touched
+  assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

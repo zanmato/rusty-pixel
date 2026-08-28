@@ -27,6 +27,10 @@ impl ResizeModifier {
 }
 
 impl ImageModifier for ResizeModifier {
+  fn max_output_dimension(&self) -> Option<i32> {
+    Some(self.pixels)
+  }
+
   fn apply(&self, img: &VipsImage) -> Result<Option<VipsImage>, Box<dyn std::error::Error>> {
     if self.height {
       return Ok(Some(ops::thumbnail_image_with_opts(
@@ -37,7 +41,6 @@ impl ImageModifier for ResizeModifier {
           size: ops::Size::Both,
           crop: ops::Interesting::None,
           output_profile: Some("sRGB".to_owned()),
-          input_profile: Some("sRGB".to_owned()),
           ..ops::ThumbnailImageOptions::default()
         },
       )?));
@@ -51,7 +54,6 @@ impl ImageModifier for ResizeModifier {
         size: ops::Size::Both,
         crop: ops::Interesting::None,
         output_profile: Some("sRGB".to_owned()),
-        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?))

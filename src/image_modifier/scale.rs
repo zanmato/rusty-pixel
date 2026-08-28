@@ -133,6 +133,10 @@ impl ScaleModifier {
 }
 
 impl ImageModifier for ScaleModifier {
+  fn max_output_dimension(&self) -> Option<i32> {
+    self.size
+  }
+
   fn apply(&self, img: &VipsImage) -> Result<Option<VipsImage>, Box<dyn std::error::Error>> {
     let plan = self.plan(img.get_width(), img.get_height());
 
@@ -144,7 +148,6 @@ impl ImageModifier for ScaleModifier {
         size: ops::Size::Both,
         crop: plan.interesting(),
         output_profile: Some("sRGB".to_owned()),
-        input_profile: Some("sRGB".to_owned()),
         ..ops::ThumbnailImageOptions::default()
       },
     )?;

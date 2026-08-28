@@ -28,6 +28,14 @@ pub struct AppConfig {
   pub worker_threads: Option<usize>,
   /// How many uploads to storage may be in flight per request. Defaults to 4.
   pub upload_concurrency: Option<usize>,
+  /// Largest side any output may have. Requests asking for more are rejected.
+  /// Defaults to 4096.
+  pub max_output_dimension: Option<i32>,
+  /// JPEG quality for the public scale endpoint. Defaults to 80.
+  pub scale_quality: Option<i32>,
+  /// Cache-Control header sent with scale endpoint responses.
+  /// Defaults to "public, max-age=31536000, immutable".
+  pub scale_cache_control: Option<String>,
 }
 
 #[derive(Deserialize)]

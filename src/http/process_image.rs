@@ -73,6 +73,17 @@ pub async fn process_image(
     _ => return Err(AppError::BadRequest("missing image or details".to_owned())),
   };
 
+  if let Some(config) = processing_request
+    .configurations
+    .iter()
+    .find(|c| c.size > state.limits.max_dimension || c.size < 1)
+  {
+    return Err(AppError::BadRequest(format!(
+      "configuration {} size {} is outside 1..={}",
+      config.id, config.size, state.limits.max_dimension
+    )));
+  }
+
   // Flag the worker when this future is dropped, which happens when the client
   // disconnects or the timeout layer gives up on the request.
   let cancel = Arc::new(AtomicBool::new(false));

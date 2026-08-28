@@ -48,7 +48,7 @@ mod storage;
   modifiers(&SecurityAddon),
   info(
     title = "Rusty Pixel API",
-    version = "0.1.3",
+    version = env!("CARGO_PKG_VERSION"),
     description = "Image proxy service that applies real-time image transformations using libvips"
   )
 )]
@@ -77,9 +77,20 @@ struct AppState {
   vips_app: Arc<VipsApp>,
   api_key: String,
   upload_concurrency: usize,
+  limits: Arc<Limits>,
+}
+
+/// Bounds and defaults that apply to every request.
+struct Limits {
+  max_dimension: i32,
+  scale_quality: i32,
+  scale_cache_control: String,
 }
 
 const DEFAULT_UPLOAD_CONCURRENCY: usize = 4;
+const DEFAULT_MAX_DIMENSION: i32 = 4096;
+const DEFAULT_SCALE_QUALITY: i32 = 80;
+const DEFAULT_SCALE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 
 const X_API_KEY: &str = "X-API-Key";
 
@@ -189,6 +200,23 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
       .upload_concurrency
       .unwrap_or(DEFAULT_UPLOAD_CONCURRENCY)
       .max(1),
+    limits: Arc::new(Limits {
+      max_dimension: cfg
+        .app
+        .max_output_dimension
+        .unwrap_or(DEFAULT_MAX_DIMENSION)
+        .max(1),
+      scale_quality: cfg
+        .app
+        .scale_quality
+        .unwrap_or(DEFAULT_SCALE_QUALITY)
+        .clamp(1, 100),
+      scale_cache_control: cfg
+        .app
+        .scale_cache_control
+        .clone()
+        .unwrap_or_else(|| DEFAULT_SCALE_CACHE_CONTROL.to_owned()),
+    }),
   };
 
   // Routing
@@ -197,7 +225,7 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
   let private_app = Router::new()
     .route("/api/v1/process-image", post(process_image::process_image))
     .layer((
-      DefaultBodyLimit::max(cfg.app.max_body_size_mb * 1000 * 1000),
+      DefaultBodyLimit::max(cfg.app.max_body_size_mb * 1024 * 1024),
       middleware::from_fn_with_state(state.clone(), auth),
     ));
 
