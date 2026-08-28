@@ -21,10 +21,10 @@ async fn main() {
     .init();
 
   // Serve
-  let router = http::bootstrap(&cfg).expect("failed creating router");
+  let app = http::bootstrap(&cfg).expect("failed creating router");
 
   let (_main_server, _metrics_server) = tokio::join!(
-    http::serve(router, &cfg.app.listen),
-    http::serve_metrics(&cfg.app.metrics_listen),
+    http::serve(app.router, &cfg.app.listen),
+    http::serve_metrics(app.metrics, &cfg.app.metrics_listen),
   );
 }

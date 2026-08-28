@@ -1,23 +1,23 @@
 use anyhow::anyhow;
 use axum::{
   Router,
-  extract::{DefaultBodyLimit, MatchedPath, Request, State},
-  http::StatusCode,
+  extract::{DefaultBodyLimit, Request, State},
+  http::{HeaderName, StatusCode},
   middleware::{self, Next},
   response::{IntoResponse, Response},
   routing::{get, post},
 };
-use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use std::future::ready;
 use std::{path::Path, sync::Arc};
 use tokio::signal;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 use tower_http::{
   catch_panic::CatchPanicLayer,
+  request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
   timeout::TimeoutLayer,
   trace::{self, TraceLayer},
 };
-use tracing::Level;
+use tracing::{Level, info_span};
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
 
@@ -30,6 +30,7 @@ use libvips::VipsApp;
 
 mod error;
 mod local_storage;
+mod metrics;
 mod process_image;
 mod s3;
 mod scale_image;
@@ -98,7 +99,17 @@ async fn auth(State(state): State<AppState>, req: Request, next: Next) -> Respon
   next.run(req).await
 }
 
-pub fn bootstrap(cfg: &Config) -> Result<Router> {
+/// The routers that make up the service. The main router serves the API and
+/// the metrics router serves Prometheus metrics and health probes on a
+/// separate listener so they are never exposed publicly.
+pub struct App {
+  pub router: Router,
+  pub metrics: Router,
+}
+
+const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+
+pub fn bootstrap(cfg: &Config) -> Result<App> {
   // Init vips
   let vips_app = Arc::new(VipsApp::new("rusty-pixel", false).expect("Cannot initialize libvips"));
   // Set number of threads in libvips's threadpool
@@ -180,16 +191,33 @@ pub fn bootstrap(cfg: &Config) -> Result<Router> {
       );
   }
 
-  let app = app.layer((
-    middleware::from_fn(track_metrics),
+  let router = app.layer((
+    SetRequestIdLayer::new(X_REQUEST_ID, MakeRequestUuid),
+    middleware::from_fn(metrics::track),
     TraceLayer::new_for_http()
-      .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+      .make_span_with(|req: &Request| {
+        let request_id = req
+          .headers()
+          .get(X_REQUEST_ID)
+          .and_then(|v| v.to_str().ok())
+          .unwrap_or("");
+        info_span!(
+          "request",
+          method = %req.method(),
+          uri = %req.uri(),
+          request_id,
+        )
+      })
       .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+    PropagateRequestIdLayer::new(X_REQUEST_ID),
     TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(60)),
     CatchPanicLayer::new(),
   ));
 
-  Ok(app)
+  Ok(App {
+    router,
+    metrics: metrics_app(),
+  })
 }
 
 pub async fn serve(router: Router, listen: &str) {
@@ -231,62 +259,19 @@ async fn shutdown_signal() {
   }
 }
 
-pub async fn serve_metrics(listen: &str) {
-  let app = metrics_app();
-
+pub async fn serve_metrics(router: Router, listen: &str) {
   let listener = tokio::net::TcpListener::bind(listen)
     .await
     .expect("failed to bind to address");
-  axum::serve(listener, app)
+  axum::serve(listener, router)
     .with_graceful_shutdown(shutdown_signal())
     .await
     .expect("error running metrics HTTP server");
 }
 
 fn metrics_app() -> Router {
-  let recorder_handle = setup_metrics_recorder();
+  let recorder_handle = metrics::setup_recorder();
   Router::new()
     .route("/metrics", get(move || ready(recorder_handle.render())))
     .route("/healthz", get(healthz))
-}
-
-fn setup_metrics_recorder() -> PrometheusHandle {
-  const EXPONENTIAL_SECONDS: &[f64] = &[
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-  ];
-
-  PrometheusBuilder::new()
-    .set_buckets_for_metric(
-      Matcher::Full("http_requests_duration_seconds".to_string()),
-      EXPONENTIAL_SECONDS,
-    )
-    .unwrap()
-    .install_recorder()
-    .unwrap()
-}
-
-async fn track_metrics(req: Request, next: Next) -> impl IntoResponse {
-  let start = Instant::now();
-  let path = if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
-    matched_path.as_str().to_owned()
-  } else {
-    req.uri().path().to_owned()
-  };
-  let method = req.method().clone();
-
-  let response = next.run(req).await;
-
-  let latency = start.elapsed().as_secs_f64();
-  let status = response.status().as_u16().to_string();
-
-  let labels = [
-    ("method", method.to_string()),
-    ("path", path),
-    ("status", status),
-  ];
-
-  metrics::counter!("http_requests_total", &labels).increment(1);
-  metrics::histogram!("http_requests_duration_seconds", &labels).record(latency);
-
-  response
 }

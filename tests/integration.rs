@@ -30,7 +30,9 @@ fn bootstrap() -> &'static axum::Router {
       },
     };
 
-    rusty_pixel::http::bootstrap(&cfg).expect("failed creating router")
+    rusty_pixel::http::bootstrap(&cfg)
+      .expect("failed creating router")
+      .router
   });
 
   router

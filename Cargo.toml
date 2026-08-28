@@ -28,6 +28,7 @@ tower-http = { version = "0.6.8", features = [
   "trace",
   "catch-panic",
   "timeout",
+  "request-id",
 ] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

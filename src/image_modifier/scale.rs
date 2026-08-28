@@ -28,25 +28,27 @@ impl ScaleModifier {
 
   pub fn evaluate(opt: &str, opts: &[&str]) -> Option<Box<dyn ImageModifier>> {
     if let Some(captures) = SCALE_REGEX.captures(opt)
-      && let (Ok(width), Ok(height)) = (captures[1].parse(), captures[2].parse()) {
-        let mut sopt = ScaleModifier {
-          aspect: util::aspect(width, height),
-          margin_percentage: 0,
-          size: None,
-          crop: true,
-        };
+      && let (Ok(width), Ok(height)) = (captures[1].parse(), captures[2].parse())
+    {
+      let mut sopt = ScaleModifier {
+        aspect: util::aspect(width, height),
+        margin_percentage: 0,
+        size: None,
+        crop: true,
+      };
 
-        // Check if there's a margin option
-        for o in opts {
-          if let Some(margin_captures) = MARGIN_REGEX.captures(o)
-            && let Ok(margin) = margin_captures[1].parse() {
-              sopt.margin_percentage = margin;
-              break;
-            }
+      // Check if there's a margin option
+      for o in opts {
+        if let Some(margin_captures) = MARGIN_REGEX.captures(o)
+          && let Ok(margin) = margin_captures[1].parse()
+        {
+          sopt.margin_percentage = margin;
+          break;
         }
-
-        return Some(Box::new(sopt));
       }
+
+      return Some(Box::new(sopt));
+    }
 
     None
   }

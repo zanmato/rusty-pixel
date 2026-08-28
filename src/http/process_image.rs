@@ -10,11 +10,12 @@ use axum::{
 };
 use libvips::{VipsImage, ops};
 use std::sync::Arc;
-use tracing::error;
+use tracing::{Span, error, info};
 use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::error::AppError;
+use crate::http::metrics::{self, Timer};
 
 #[utoipa::path(
   post,
@@ -91,9 +92,11 @@ pub async fn process_image(
   let image_portrait = image_size.0 < image_size.1;
 
   if let Some(min_size) = processing_request.min_size
-    && image_size.0 < min_size && image_size.1 < min_size {
-      return Err(AppError::BadRequest("image too small".to_owned()));
-    }
+    && image_size.0 < min_size
+    && image_size.1 < min_size
+  {
+    return Err(AppError::BadRequest("image too small".to_owned()));
+  }
 
   let environment_image_conf = if image_portrait {
     processing_request.portrait_environment_image.as_ref()
@@ -125,8 +128,16 @@ pub async fn process_image(
   let (send, recv) = tokio::sync::oneshot::channel();
   let (tx, mut rx) = tokio::sync::mpsc::channel(processing_request.configurations.len().max(1));
 
+  ::metrics::histogram!(metrics::CONFIGURATIONS)
+    .record(processing_request.configurations.len() as f64);
+
   // Run the image transformation in a thread from the thread pool
+  let span = Span::current();
+  let queued = Timer::start();
   rayon::spawn(move || {
+    let _guard = span.enter();
+    queued.observe(metrics::QUEUE_WAIT);
+    let processing = Timer::start();
     // Decode the image once and reuse across all configurations
     let source_image = match VipsImage::new_from_buffer(&data, "") {
       Ok(i) => i,
@@ -200,14 +211,12 @@ pub async fn process_image(
       )));
 
       if config.conditions.use_environment_image
-        && let (Some(env_img), Some(env_opts)) = (&environment_image, &environment_image_opts) {
-          modifiers.push(Box::new(
-            image_modifier::environment::EnvironmentModifier::new(
-              env_img.clone(),
-              env_opts.clone(),
-            ),
-          ));
-        }
+        && let (Some(env_img), Some(env_opts)) = (&environment_image, &environment_image_opts)
+      {
+        modifiers.push(Box::new(
+          image_modifier::environment::EnvironmentModifier::new(env_img.clone(), env_opts.clone()),
+        ));
+      }
 
       for opt in modifiers {
         match opt.apply(&output_image) {
@@ -321,6 +330,7 @@ pub async fn process_image(
       });
     }
 
+    processing.observe(metrics::PROCESS_DURATION);
     let _ = send.send(Ok(()));
   });
 
@@ -331,13 +341,18 @@ pub async fn process_image(
       Ok(data) => data,
       Err(arc) => (*arc).clone(),
     };
+    let upload = Timer::start();
     let upload_res = match state
       .storage_client
       .upload_object(data, &img.path, &img.mime)
       .await
     {
-      Ok(r) => r,
+      Ok(r) => {
+        upload.observe(metrics::UPLOAD_DURATION);
+        r
+      }
       Err(e) => {
+        ::metrics::counter!(metrics::UPLOAD_ERRORS).increment(1);
         error!("failed to upload image: {:#}", e);
         rx.close();
         return Err(AppError::InternalServerError(e.to_string()));
@@ -364,6 +379,8 @@ pub async fn process_image(
   }
 
   rx.close();
+
+  info!(images = processed_images.len(), "processed image");
 
   Ok(Json(processed_images))
 }

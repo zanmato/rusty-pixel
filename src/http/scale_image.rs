@@ -4,9 +4,10 @@ use axum::{
   response::IntoResponse,
 };
 use libvips::{VipsImage, ops};
-use tracing::error;
+use tracing::{Span, error};
 
 use crate::http::AppState;
+use crate::http::metrics::{self, Timer};
 use crate::image_modifier;
 
 use crate::http::error::AppError;
@@ -38,7 +39,13 @@ pub async fn scale(
 
   // Run the image transformation in a thread from the thread pool
   let (send, recv) = tokio::sync::oneshot::channel();
+  let span = Span::current();
+  let queued = Timer::start();
   rayon::spawn(move || {
+    let _guard = span.enter();
+    queued.observe(metrics::QUEUE_WAIT);
+    let processing = Timer::start();
+
     // Parse options and create modifiers
     let modifiers = parse_options(&options);
     if modifiers.is_empty() {
@@ -75,6 +82,7 @@ pub async fn scale(
       },
     ) {
       Ok(buffer) => {
+        processing.observe(metrics::PROCESS_DURATION);
         let _ = send.send(Ok(buffer));
       }
       Err(e) => {
