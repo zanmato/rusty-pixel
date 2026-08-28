@@ -88,6 +88,7 @@ struct Limits {
 }
 
 const DEFAULT_UPLOAD_CONCURRENCY: usize = 4;
+const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_MAX_DIMENSION: i32 = 4096;
 const DEFAULT_SCALE_QUALITY: i32 = 80;
 const DEFAULT_SCALE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
@@ -123,16 +124,19 @@ pub struct App {
 
 const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 
-pub fn bootstrap(cfg: &Config) -> Result<App> {
+pub async fn bootstrap(cfg: &Config) -> Result<App> {
   // Init vips
   let vips_app = Arc::new(VipsApp::new("rusty-pixel", false).expect("Cannot initialize libvips"));
   // Set number of threads in libvips's threadpool
   vips_app.concurrency_set(cfg.app.vips_concurrency);
 
-  // Disable vips cache
-  vips_app.cache_set_max_mem(0);
-  vips_app.cache_set_max(0);
-  vips_app.cache_set_max_files(0);
+  // The operation cache only helps when the same image is processed twice,
+  // so it is off unless a limit is configured.
+  vips_app.cache_set_max_mem(cfg.app.vips_cache_max_mem_mb * 1024 * 1024);
+  if cfg.app.vips_cache_max_mem_mb == 0 {
+    vips_app.cache_set_max(0);
+    vips_app.cache_set_max_files(0);
+  }
 
   // Size the worker pool. The global pool can only be built once per process,
   // which matters for tests that bootstrap more than once.
@@ -163,23 +167,36 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
         None => return Err(anyhow!("S3 storage config is missing")),
       };
 
-      let cred = aws_sdk_s3::config::Credentials::new(
-        storage_config.access_key_id.clone(),
-        storage_config.secret_access_key.clone(),
-        None,
-        None,
-        "loaded-from-custom-env",
-      );
-
-      let s3_config = aws_sdk_s3::config::Builder::new()
+      let mut builder = aws_sdk_s3::config::Builder::new()
         .endpoint_url(storage_config.endpoint.clone())
-        .credentials_provider(cred)
         .region(aws_sdk_s3::config::Region::new(
           storage_config.region.clone(),
         ))
         .force_path_style(storage_config.force_path_style) // apply bucketname as path param instead of pre-domain
-        .behavior_version_latest()
-        .build();
+        .behavior_version_latest();
+
+      builder = match (
+        &storage_config.access_key_id,
+        &storage_config.secret_access_key,
+      ) {
+        (Some(key), Some(secret)) => builder.credentials_provider(
+          aws_sdk_s3::config::Credentials::new(key, secret, None, None, "config"),
+        ),
+        (None, None) => {
+          tracing::info!("no static S3 credentials configured, using the AWS default chain");
+          let chain = aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+            .build()
+            .await;
+          builder.credentials_provider(chain)
+        }
+        _ => {
+          return Err(anyhow!(
+            "S3 access_key_id and secret_access_key must be set together"
+          ));
+        }
+      };
+
+      let s3_config = builder.build();
 
       let client = aws_sdk_s3::Client::from_conf(s3_config);
       Arc::new(s3::Client::new(
@@ -263,7 +280,10 @@ pub fn bootstrap(cfg: &Config) -> Result<App> {
       })
       .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
     PropagateRequestIdLayer::new(X_REQUEST_ID),
-    TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(60)),
+    TimeoutLayer::with_status_code(
+      StatusCode::REQUEST_TIMEOUT,
+      Duration::from_secs(cfg.app.request_timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS)),
+    ),
     CatchPanicLayer::new(),
   ));
 

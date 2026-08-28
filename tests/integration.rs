@@ -4,48 +4,51 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use rusty_pixel::config;
-use std::sync::OnceLock;
+use tokio::sync::OnceCell;
 use tokio::{fs, net::TcpListener};
 use tower::ServiceExt;
 
-static TEST_BOOSTRAP: OnceLock<axum::Router> = OnceLock::new();
+static TEST_BOOSTRAP: OnceCell<axum::Router> = OnceCell::const_new();
 
-fn bootstrap() -> &'static axum::Router {
-  let router = TEST_BOOSTRAP.get_or_init(|| {
-    let cfg = config::Config {
-      app: config::AppConfig {
-        api_key: "test".to_string(),
-        vips_concurrency: 1,
-        max_body_size_mb: 10,
-        enable_openapi: Some(false),
-        worker_threads: None,
-        upload_concurrency: None,
-        max_output_dimension: None,
-        scale_quality: None,
-        scale_cache_control: None,
-        listen: "0.0.0.0:0".to_string(),
-        metrics_listen: "0.0.0.0:0".to_string(),
-      },
-      storage: config::StorageConfig {
-        storage_type: config::StorageType::Local,
-        local: Some(config::StorageConfigLocal {
-          path: "tests/testdata".to_string(),
-        }),
-        s3: None,
-      },
-    };
+async fn bootstrap() -> &'static axum::Router {
+  TEST_BOOSTRAP
+    .get_or_init(|| async {
+      let cfg = config::Config {
+        app: config::AppConfig {
+          api_key: "test".to_string(),
+          vips_concurrency: 1,
+          vips_cache_max_mem_mb: 0,
+          max_body_size_mb: 10,
+          enable_openapi: Some(false),
+          worker_threads: None,
+          upload_concurrency: None,
+          max_output_dimension: None,
+          scale_quality: None,
+          scale_cache_control: None,
+          request_timeout_secs: None,
+          listen: "0.0.0.0:0".to_string(),
+          metrics_listen: "0.0.0.0:0".to_string(),
+        },
+        storage: config::StorageConfig {
+          storage_type: config::StorageType::Local,
+          local: Some(config::StorageConfigLocal {
+            path: "tests/testdata".to_string(),
+          }),
+          s3: None,
+        },
+      };
 
-    rusty_pixel::http::bootstrap(&cfg)
-      .expect("failed creating router")
-      .router
-  });
-
-  router
+      rusty_pixel::http::bootstrap(&cfg)
+        .await
+        .expect("failed creating router")
+        .router
+    })
+    .await
 }
 
 #[tokio::test]
 async fn scale_image() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let response = router
     .oneshot(
@@ -68,7 +71,7 @@ async fn scale_image() {
 
 #[tokio::test]
 async fn process_image() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
   let addr = listener.local_addr().unwrap();
@@ -221,7 +224,7 @@ async fn process_image() {
 
 #[tokio::test]
 async fn scale_image_converts_to_srgb() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   // Solid sRGB red stored as Display P3 with the profile embedded. Its raw
   // pixel values are roughly (234, 51, 35). The orientation option is a no op
@@ -254,7 +257,7 @@ async fn scale_image_converts_to_srgb() {
 
 #[tokio::test]
 async fn scale_image_not_found() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let response = router
     .oneshot(
@@ -271,7 +274,7 @@ async fn scale_image_not_found() {
 
 #[tokio::test]
 async fn scale_image_invalid_options() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let response = router
     .oneshot(
@@ -289,7 +292,7 @@ async fn scale_image_invalid_options() {
 
 #[tokio::test]
 async fn process_image_unauthorized() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
   let addr = listener.local_addr().unwrap();
@@ -330,7 +333,7 @@ async fn process_image_unauthorized() {
 
 #[tokio::test]
 async fn process_image_missing_fields() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
   let addr = listener.local_addr().unwrap();
@@ -369,7 +372,7 @@ async fn process_image_missing_fields() {
 
 #[tokio::test]
 async fn process_svg_without_allow_vector() {
-  let router = bootstrap().clone();
+  let router = bootstrap().await.clone();
 
   let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
   let addr = listener.local_addr().unwrap();

@@ -84,6 +84,7 @@ async fn process_image_throughput() {
     app: config::AppConfig {
       api_key: "test".to_string(),
       vips_concurrency: 1,
+      vips_cache_max_mem_mb: 0,
       max_body_size_mb: 100,
       enable_openapi: Some(false),
       worker_threads: None,
@@ -91,6 +92,7 @@ async fn process_image_throughput() {
       max_output_dimension: None,
       scale_quality: None,
       scale_cache_control: None,
+      request_timeout_secs: None,
       listen: "0.0.0.0:0".to_string(),
       metrics_listen: "0.0.0.0:0".to_string(),
     },
@@ -103,6 +105,7 @@ async fn process_image_throughput() {
     },
   };
   let router = rusty_pixel::http::bootstrap(&cfg)
+    .await
     .expect("failed creating router")
     .router;
 
