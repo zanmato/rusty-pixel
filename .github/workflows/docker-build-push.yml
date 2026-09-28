@@ -50,27 +50,32 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Extract changelog for current version
-      id: changelog
-      run: |
-        VERSION="${GITHUB_REF#refs/tags/v}"
-        CHANGELOG=$(awk -v ver="$VERSION" '
-          /^## \[/ { in_section = 0 }
-          $0 ~ "^## \\[" ver "\\]" { in_section = 1; next }
-          in_section && /^## \[/ { exit }
-          in_section { print }
-        ' CHANGELOG.md)
-        echo "body<<EOF" >> $GITHUB_OUTPUT
-        echo "$CHANGELOG" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-
+    # The notes go through a file, never through ${{ }} interpolation, so
+    # backticks and $ in the changelog are not run as shell code.
     - name: Create GitHub Release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        IMAGE: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
       run: |
-        IMAGE="${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
         VERSION="${GITHUB_REF#refs/tags/v}"
-        BODY="${{ steps.changelog.outputs.body }}\n\n**Docker image:** \`${IMAGE}:${VERSION}\`"
+        NOTES="${RUNNER_TEMP}/release-notes.md"
+
+        # Print the lines between "## [VERSION]" and the next "## [" heading.
+        # index() matches the heading literally, so the dots in the version
+        # are not regex wildcards.
+        awk -v heading="## [${VERSION}]" '
+          index($0, heading) == 1 { found = 1; next }
+          found && /^## \[/ { exit }
+          found { print }
+        ' CHANGELOG.md > "$NOTES"
+
+        if ! grep -q '[^[:space:]]' "$NOTES"; then
+          echo "::error::No changelog section found for ${VERSION} in CHANGELOG.md"
+          exit 1
+        fi
+
+        printf '\n**Docker image:** `%s:%s`\n' "$IMAGE" "$VERSION" >> "$NOTES"
+
         gh release create "${GITHUB_REF_NAME}" \
           --title "${GITHUB_REF_NAME}" \
-          --notes "$(echo -e "$BODY")"
+          --notes-file "$NOTES"
