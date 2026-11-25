@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `min_side` on a process image configuration. When the scaled image has a
+  side shorter than this, the canvas is padded up to it with the dominant
+  colour of the image's corners. The image keeps its aspect ratio
+- `min_side_max_scale` on a process image configuration. An image close to
+  `min_side` is scaled up past `size` by at most this factor instead of padded
+
+### Fixed
+
+- The frame added for an aspect ratio or margin was opaque white on images
+  with an alpha channel, it is now transparent
+
 ## [0.1.8] - 2026-09-28
 
 ### Changed

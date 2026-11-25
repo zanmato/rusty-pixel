@@ -320,7 +320,8 @@ impl Pipeline {
       config.margin_percent,
       Some(config.size),
       true,
-    );
+    )
+    .with_min_side(config.min_side, config.min_side_max_scale);
     let plan = scale.plan(self.source.width, self.source.height);
 
     let thumb = ops::thumbnail_buffer_with_opts(
@@ -370,7 +371,8 @@ impl Pipeline {
       config.margin_percent,
       Some(config.size),
       false,
-    );
+    )
+    .with_min_side(config.min_side, config.min_side_max_scale);
     self.apply(&scale, image)
   }
 

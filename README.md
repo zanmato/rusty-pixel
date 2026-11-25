@@ -26,6 +26,26 @@ Examples
 - Scale with margin
   - `s40x30-m10` - **Scale by 40 / 30 with added percentage margin of the shortest side**
 
+## Process image
+
+`POST /api/v1/process-image` takes an image and a list of configurations and
+stores one output per configuration, plus a WebP alternative.
+
+- `size`, the longest side of the output
+- `aspect`, the canvas ratio, `0` keeps the ratio of the source
+- `margin_percent`, white space around the image inside the canvas
+- `min_side`, optional, the shortest side the output may have. A wide source
+  scaled to 1024 x 400 with `min_side` 500 becomes 1024 x 500. The image is not
+  stretched, the extra space takes the dominant colour of the image's corners
+  (transparent for transparent images). Must not be larger than `size`
+- `min_side_max_scale`, optional, lets an image that is close to `min_side`
+  be scaled up to reach it instead of padded. With `1.15` the longest side may
+  grow to `size * 1.15`: 1024 x 467 becomes 1096 x 500 with no padding, while
+  1024 x 409 would need more and is padded to 1024 x 500
+
+The request level `min_size` is something else, it rejects sources where both
+sides are smaller than the given value.
+
 ## Configuration
 
 Copy `config.example.toml` to `config.toml`. Every value can be overridden with

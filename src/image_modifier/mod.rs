@@ -3,6 +3,7 @@ use libvips::VipsImage;
 mod util;
 
 pub mod blackandwhite;
+pub mod border;
 pub mod environment;
 pub mod orientation;
 pub mod resize;

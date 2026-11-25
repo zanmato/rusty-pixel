@@ -31,6 +31,16 @@ pub struct ImageConfiguration {
   pub aspect: f64,
   pub margin_percent: i32,
   pub size: i32,
+  /// Shortest side the output may have. When the scaled image is smaller the
+  /// canvas is padded with the dominant colour of the image's corners, the image
+  /// itself keeps its aspect ratio. Must not be larger than `size`.
+  #[serde(default)]
+  pub min_side: Option<i32>,
+  /// How far the longest side may grow past `size` to reach `min_side`
+  /// without padding, as a factor such as 1.15. Images that would need more
+  /// are padded instead. Absent means always pad.
+  #[serde(default)]
+  pub min_side_max_scale: Option<f64>,
   pub quality: i32,
   pub conditions: ImageConditions,
 }

@@ -84,6 +84,32 @@ pub async fn process_image(
     )));
   }
 
+  if let Some(config) = processing_request
+    .configurations
+    .iter()
+    .find(|c| c.min_side.is_some_and(|m| m < 0 || m > c.size))
+  {
+    return Err(AppError::BadRequest(format!(
+      "configuration {} min_side {} is outside 0..={}",
+      config.id,
+      config.min_side.unwrap_or_default(),
+      config.size
+    )));
+  }
+
+  if let Some(config) = processing_request.configurations.iter().find(|c| {
+    c.min_side_max_scale.is_some_and(|s| {
+      !s.is_finite() || s < 1.0 || c.size as f64 * s > state.limits.max_dimension as f64
+    })
+  }) {
+    return Err(AppError::BadRequest(format!(
+      "configuration {} min_side_max_scale {} must be at least 1 and keep size within {}",
+      config.id,
+      config.min_side_max_scale.unwrap_or_default(),
+      state.limits.max_dimension
+    )));
+  }
+
   // Flag the worker when this future is dropped, which happens when the client
   // disconnects or the timeout layer gives up on the request.
   let cancel = Arc::new(AtomicBool::new(false));
